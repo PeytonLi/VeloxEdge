@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useReducer, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import type { EngineSnapshot } from "@veloxedge/bandit-engine";
 import { useVeloxEngine } from "@/hooks/useVeloxEngine";
 import type { InterceptorEvent } from "@/hooks/useVeloxEngine";
@@ -27,6 +27,8 @@ import {
   type ConvergencePoint,
   type TimelinePoint,
 } from "@/components/dashboardData";
+
+type RunState = "idle" | "running" | "paused";
 
 interface DemoState {
   tick: number;
@@ -171,7 +173,9 @@ export default function Dashboard() {
     createInitialDemoState,
   );
   const [fallbackAlpha, setFallbackAlpha] = useState(DEFAULT_ALPHA);
-  const [isRunning, setIsRunning] = useState(false);
+  const [runState, setRunState] = useState<RunState>("idle");
+  const [stepBusy, setStepBusy] = useState(false);
+  const continuousRef = useRef({ active: false, paused: false });
 
   const selectedJourney = useMemo(() => {
     return (
@@ -221,7 +225,7 @@ export default function Dashboard() {
   };
 
   const handleStep = async () => {
-    setIsRunning(true);
+    setStepBusy(true);
     const nextJourneyStep =
       selectedJourney.steps[
         displayStats.totalSteps % Math.max(1, selectedJourney.steps.length)
@@ -238,11 +242,11 @@ export default function Dashboard() {
         prompt,
         alpha: fallbackAlpha,
       });
-    setIsRunning(false);
+    setStepBusy(false);
   };
 
   const handleRunJourney = async () => {
-    setIsRunning(true);
+    setStepBusy(true);
     let usedRealEngine = false;
     if (engine.ready) {
       try {
@@ -268,7 +272,7 @@ export default function Dashboard() {
         await delay(170);
       }
     }
-    setIsRunning(false);
+    setStepBusy(false);
   };
 
   const handleReset = () => {
@@ -293,6 +297,67 @@ export default function Dashboard() {
       }
     }
   };
+
+  // Keep a stable ref to the step executor so the continuous loop always
+  // reads the latest prompt, journey, alpha, and engine state.
+  const executeStepRef = useRef<() => Promise<boolean>>(async () => false);
+  executeStepRef.current = async () => {
+    const totalSteps = (hasRealTelemetry ? engine.stats : displayStats)
+      .totalSteps;
+    const idx = totalSteps % Math.max(1, selectedJourney.steps.length);
+    const nextJourneyStep = selectedJourney.steps[idx];
+    const input =
+      prompt.trim().length > 0
+        ? prompt
+        : (nextJourneyStep?.contextVector ?? prompt);
+    const usedRealEngine = await runRealStep(input);
+    if (!usedRealEngine) {
+      dispatchDemo({
+        type: "step",
+        journey: selectedJourney,
+        prompt,
+        alpha: fallbackAlpha,
+      });
+    }
+    return usedRealEngine;
+  };
+
+  const runContinuousLoop = useCallback(async () => {
+    continuousRef.current = { active: true, paused: false };
+    setRunState("running");
+
+    while (continuousRef.current.active) {
+      if (continuousRef.current.paused) {
+        await delay(120);
+        continue;
+      }
+      await executeStepRef.current();
+      await delay(280);
+    }
+
+    setRunState("idle");
+  }, []);
+
+  const handlePlay = useCallback(() => {
+    if (runState === "paused") {
+      continuousRef.current.paused = false;
+      setRunState("running");
+      return;
+    }
+    if (runState === "idle") {
+      runContinuousLoop();
+    }
+  }, [runState, runContinuousLoop]);
+
+  const handlePause = useCallback(() => {
+    continuousRef.current.paused = true;
+    setRunState("paused");
+  }, []);
+
+  const handleStop = useCallback(() => {
+    continuousRef.current = { active: false, paused: false };
+    setRunState("idle");
+  }, []);
 
   return (
     <main className="dashboard-shell">
@@ -350,7 +415,11 @@ export default function Dashboard() {
             onStep={handleStep}
             onRunJourney={handleRunJourney}
             onReset={handleReset}
-            isRunning={isRunning}
+            runState={runState}
+            onPlay={handlePlay}
+            onPause={handlePause}
+            onStop={handleStop}
+            isRunning={stepBusy || runState === "running"}
             ready={engine.ready}
             alpha={alpha}
             activeStepLabel={activeStepLabel}

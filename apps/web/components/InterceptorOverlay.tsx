@@ -1,7 +1,8 @@
-'use client';
+"use client";
 
-import type { InterceptorEvent } from '@/hooks/useVeloxEngine';
-import { actionCopy, buildFallbackEvents } from './dashboardData';
+import { useEffect, useRef } from "react";
+import type { InterceptorEvent } from "@/hooks/useVeloxEngine";
+import { actionCopy, buildFallbackEvents } from "./dashboardData";
 
 interface InterceptorOverlayProps {
   events?: InterceptorEvent[];
@@ -10,16 +11,28 @@ interface InterceptorOverlayProps {
   ready?: boolean;
 }
 
-const fallbackEvents = buildFallbackEvents(0, 'TOOL_CONTEXT', 'Awaiting first latent trajectory', true);
+const fallbackEvents = buildFallbackEvents(
+  0,
+  "TOOL_CONTEXT",
+  "Awaiting first latent trajectory",
+  true,
+);
 
 export default function InterceptorOverlay({
   events = fallbackEvents,
-  activeAction = 'TOOL_CONTEXT',
-  activeStepLabel = 'Awaiting first latent trajectory',
+  activeAction = "TOOL_CONTEXT",
+  activeStepLabel = "Awaiting first latent trajectory",
   ready = false,
 }: InterceptorOverlayProps) {
+  const streamRef = useRef<HTMLDivElement>(null);
   const copy = actionCopy(activeAction);
   const visibleEvents = events.length > 0 ? events : fallbackEvents;
+
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.scrollTop = streamRef.current.scrollHeight;
+    }
+  }, [visibleEvents]);
 
   return (
     <article className="interceptor-card">
@@ -37,22 +50,32 @@ export default function InterceptorOverlay({
         </div>
       </div>
 
-      <div className="active-prefetch" style={{ background: copy.softAccent, borderColor: copy.accent }}>
+      <div
+        className="active-prefetch"
+        style={{ background: copy.softAccent, borderColor: copy.accent }}
+      >
         <span className="radar-dot" style={{ background: copy.accent }} />
         <div>
           <strong>{copy.asset}</strong>
           <p>{activeStepLabel}</p>
         </div>
-        <em>{ready ? 'live engine' : 'demo telemetry'}</em>
+        <em>{ready ? "live engine" : "demo telemetry"}</em>
       </div>
 
-      <div className="stream-window">
+      <div className="stream-window" ref={streamRef}>
         {visibleEvents.map((event, index) => {
           const eventCopy = actionCopy(event.action);
           return (
             <div className="stream-line" key={`${event.timestamp}-${index}`}>
-              <span className="stream-time">{String(event.timestamp).padStart(3, '0')}ms</span>
-              <span className="stream-led" style={{ background: event.cacheHit ? eventCopy.accent : '#fb923c' }} />
+              <span className="stream-time">
+                {String(event.timestamp).padStart(3, "0")}ms
+              </span>
+              <span
+                className="stream-led"
+                style={{
+                  background: event.cacheHit ? eventCopy.accent : "#fb923c",
+                }}
+              />
               <code>{event.message}</code>
             </div>
           );
