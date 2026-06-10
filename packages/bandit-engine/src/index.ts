@@ -19,15 +19,27 @@ import type { SerializedEngineState } from "./edge";
 
 export type { BanditConfig, EngineSnapshot, PredictionResult, UcbBreakdown };
 export type {
+  AssetDescriptor,
   EdgeEngineConfig,
   EdgePredictRequest,
   EdgePredictResponse,
+  EdgeResolveRequest,
+  EdgeResolveResponse,
   EdgeResponseBase,
   EdgeSessionRequest,
   EdgeUpdateRequest,
   EdgeUpdateResponse,
+  PendingPrediction,
+  PrefetchOutcome,
   SerializedEngineState,
 } from "./edge";
+export {
+  VELOX_ASSET_TTL_SECONDS,
+  VELOX_EDGE_SECRET_HEADER,
+  VELOX_PENDING_TTL_SECONDS,
+  VELOX_STATE_TTL_SECONDS,
+} from "./edge";
+export { deriveAssetKey, rewardFromLatency } from "./liveLoop";
 
 const UCB_TIE_EPSILON = 1e-12;
 

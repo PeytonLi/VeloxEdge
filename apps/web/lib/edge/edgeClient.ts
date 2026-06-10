@@ -1,6 +1,8 @@
 import type {
   EdgePredictRequest,
   EdgePredictResponse,
+  EdgeResolveRequest,
+  EdgeResolveResponse,
   EdgeUpdateRequest,
   EdgeUpdateResponse,
 } from "@veloxedge/bandit-engine";
@@ -40,7 +42,10 @@ async function postJson<TRequest, TResponse extends object>(
   if (!response.ok) {
     const message = await parseError(response);
     throw new Error(
-      "VeloxEdge edge request failed (" + String(response.status) + "): " + message,
+      "VeloxEdge edge request failed (" +
+        String(response.status) +
+        "): " +
+        message,
     );
   }
 
@@ -66,7 +71,17 @@ export async function update(
   );
 }
 
+export async function resolve(
+  request: EdgeResolveRequest,
+): Promise<EdgeClientResponse<EdgeResolveResponse>> {
+  return postJson<EdgeResolveRequest, EdgeResolveResponse>(
+    "/api/edge/resolve",
+    request,
+  );
+}
+
 export const edgeClient = {
   predict,
   update,
+  resolve,
 };

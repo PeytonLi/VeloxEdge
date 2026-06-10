@@ -1,5 +1,9 @@
 import { createResponse } from "create-response";
-import { LinUCBEngine } from "@veloxedge/bandit-engine";
+import {
+  LinUCBEngine,
+  deriveAssetKey,
+  rewardFromLatency,
+} from "@veloxedge/bandit-engine";
 import { EdgeKV } from "./edgekv.js";
 import { edgekv_access_tokens } from "./edgekv_tokens.js";
 
@@ -12,6 +16,8 @@ const EDGEKV_NAMESPACE = "veloxedge";
 const EDGEKV_GROUP = "sessions";
 const EDGEKV_TIMEOUT_MS = 250;
 const SESSION_PREFIX = "veloxedge_";
+const EDGE_HIT_MS = 5;
+const COLD_ORIGIN_MS = 100;
 const DEFAULT_CONFIG = {
   dimensions: 12,
   alpha: 1,
@@ -167,6 +173,15 @@ async function putEngineState(edgeKv, item, state) {
   });
 }
 
+async function prefetchAsset(_request, key) {
+  return {
+    executed: false,
+    key,
+    originMs: null,
+    cacheWritten: false,
+  };
+}
+
 function createEdgeKv(request) {
   return new EdgeKV({
     namespace: EDGEKV_NAMESPACE,
@@ -191,12 +206,16 @@ async function handlePredict(request, payload) {
   const state = await getEngineState(edgeKv, item, config);
   const engine = restoreEngine(state, config);
   const prediction = engine.predictNextAction(payload.contextVector);
+  const predictedKey = deriveAssetKey(payload.contextVector, prediction.action);
+  const prefetch = await prefetchAsset(request, predictedKey);
 
   await putEngineState(edgeKv, item, engine.serialize());
 
   return jsonResponse(200, {
     sessionId,
     action: prediction.action,
+    predictedKey,
+    prefetch,
     ucbBreakdown: prediction.ucbBreakdown,
     computeMicros: computeMicrosSince(startMicros),
   });
@@ -226,6 +245,37 @@ async function handleUpdate(request, payload) {
     sessionId,
     action: prediction.action,
     ucbBreakdown: prediction.ucbBreakdown,
+    computeMicros: computeMicrosSince(startMicros),
+  });
+}
+
+async function handleResolve(request, payload) {
+  const startMicros = nowMicros();
+  const config = sanitizeConfig(payload?.config ?? payload);
+  assertContextVector(payload?.contextVector, config.dimensions);
+
+  const sessionId = String(payload.sessionId ?? "");
+  const requestedKey = String(payload.requestedKey ?? "");
+  const item = sanitizeSessionId(sessionId);
+  const edgeKv = createEdgeKv(request);
+  const state = await getEngineState(edgeKv, item, config);
+  const engine = restoreEngine(state, config);
+  const prediction = engine.predictNextAction(payload.contextVector);
+  const latencyMs = COLD_ORIGIN_MS;
+  const reward = rewardFromLatency(latencyMs, EDGE_HIT_MS, COLD_ORIGIN_MS);
+
+  engine.updateWeights(prediction.action, payload.contextVector, reward);
+  const nextPrediction = engine.predictNextAction(payload.contextVector);
+  await putEngineState(edgeKv, item, engine.serialize());
+
+  return jsonResponse(200, {
+    sessionId,
+    requestedKey,
+    action: prediction.action,
+    cacheHit: false,
+    latencyMs,
+    reward,
+    ucbBreakdown: nextPrediction.ucbBreakdown,
     computeMicros: computeMicrosSince(startMicros),
   });
 }
@@ -263,7 +313,7 @@ export async function responseProvider(request) {
     return errorResponse(
       405,
       "method_not_allowed",
-      "Use POST for /predict, /update, or /reset",
+      "Use POST for /predict, /resolve, /update, or /reset",
     );
   }
 
@@ -271,6 +321,7 @@ export async function responseProvider(request) {
     const payload = await readJsonBody(request);
 
     if (matchesRoute(path, "/predict")) return handlePredict(request, payload);
+    if (matchesRoute(path, "/resolve")) return handleResolve(request, payload);
     if (matchesRoute(path, "/update")) return handleUpdate(request, payload);
     if (matchesRoute(path, "/reset")) return handleReset(request, payload);
 
