@@ -4,12 +4,7 @@ import { useMemo, useReducer, useState } from "react";
 import type { EngineSnapshot } from "@veloxedge/bandit-engine";
 import { useVeloxEngine } from "@/hooks/useVeloxEngine";
 import type { InterceptorEvent } from "@/hooks/useVeloxEngine";
-import {
-  accumulateStats,
-  computeLatency,
-  emptyStats,
-  journeys as scriptedJourneys,
-} from "@/lib/simulation";
+import { emptyStats, journeys as scriptedJourneys } from "@/lib/simulation";
 import type { Journey, JourneyStep, LatencyStats } from "@/lib/simulation";
 import Console from "@/components/Console";
 import InterceptorOverlay from "@/components/InterceptorOverlay";
@@ -74,11 +69,6 @@ function createInitialDemoState(alpha: number): DemoState {
   };
 }
 
-function chooseMissAction(bestAction: string, tick: number): string {
-  const options = ACTIONS.filter((action) => action !== bestAction);
-  return options[tick % options.length] ?? "NO_OP";
-}
-
 function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === "reset") return createInitialDemoState(action.alpha);
   if (action.type === "alpha") {
@@ -107,21 +97,30 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
     steps[state.tick % steps.length] ??
     DEMO_JOURNEYS[0].steps[0];
   const prompt = action.prompt?.trim() ?? "";
-  const bestAction =
-    prompt.length > 0 ? classifyPromptAction(prompt) : journeyStep.bestAction;
+  const requestedAction =
+    prompt.length > 0
+      ? classifyPromptAction(prompt)
+      : ACTIONS[nextTick % ACTIONS.length];
   const warmedUp = nextTick > 1;
   const explorationMiss = action.alpha > 1.55 && nextTick % 4 === 0;
-  const budgetGuard = bestAction === "NO_OP";
-  const cacheHit = warmedUp && !explorationMiss && !budgetGuard;
+  const cacheHit = warmedUp && !explorationMiss && requestedAction !== "NO_OP";
   const predictedAction = cacheHit
-    ? bestAction
-    : chooseMissAction(bestAction, nextTick);
+    ? requestedAction
+    : (ACTIONS[(nextTick + 1) % ACTIONS.length] ?? "NO_OP");
   const coldFetchMs = Math.max(
     620,
     journeyStep.coldFetchMs + (prompt.length % 5) * 18,
   );
-  const latency = computeLatency(predictedAction, bestAction, coldFetchMs);
-  const stats = accumulateStats(state.stats, latency);
+  const veloxStepMs = cacheHit ? 5 + (nextTick % 2) * 2 : coldFetchMs;
+  const savedMs = cacheHit ? Math.max(0, coldFetchMs - veloxStepMs) : 0;
+  const stats: LatencyStats = {
+    totalSteps: state.stats.totalSteps + 1,
+    cacheHits: state.stats.cacheHits + (cacheHit ? 1 : 0),
+    coldFetches: state.stats.coldFetches + (cacheHit ? 0 : 1),
+    totalSavedMs: state.stats.totalSavedMs + savedMs,
+    naiveTotalMs: state.stats.naiveTotalMs + coldFetchMs,
+    veloxTotalMs: state.stats.veloxTotalMs + veloxStepMs,
+  };
   const snapshot = createDemoSnapshot(action.alpha, nextTick, predictedAction);
   const label =
     prompt.length > 0 ? `Free-text prompt: ${prompt}` : journeyStep.label;
@@ -130,7 +129,7 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
     tick: nextTick,
     stats,
     events: [
-      ...buildFallbackEvents(nextTick, predictedAction, label, latency.cacheHit),
+      ...buildFallbackEvents(nextTick, predictedAction, label, cacheHit),
       ...state.events,
     ].slice(0, 18),
     snapshot,
