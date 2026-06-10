@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { EdgePredictRequest } from "@veloxedge/bandit-engine";
+import {
+  VELOX_EDGE_SECRET_HEADER,
+  type EdgePredictRequest,
+} from "@veloxedge/bandit-engine";
 import { edgeKvEmulator } from "@/lib/edge/edgeKvEmulator";
 
 export const runtime = "nodejs";
@@ -12,13 +15,21 @@ function edgeworkerEndpoint(pathname: string): string | null {
     : baseUrl + pathname;
 }
 
+function proxyHeaders(): HeadersInit {
+  const secret = process.env.VELOX_EDGE_SECRET?.trim();
+  return {
+    "content-type": "application/json",
+    ...(secret ? { [VELOX_EDGE_SECRET_HEADER]: secret } : {}),
+  };
+}
+
 async function proxyToEdgeworker(
   endpoint: string,
   payload: EdgePredictRequest,
 ): Promise<NextResponse> {
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: proxyHeaders(),
     body: JSON.stringify(payload),
   });
 
@@ -48,7 +59,8 @@ export async function POST(request: NextRequest) {
     const response = await edgeKvEmulator.predict(payload);
     return NextResponse.json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown emulator failure";
+    const message =
+      error instanceof Error ? error.message : "Unknown emulator failure";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

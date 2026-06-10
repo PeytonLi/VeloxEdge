@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   VELOX_EDGE_SECRET_HEADER,
-  type EdgeUpdateRequest,
+  type EdgeResolveRequest,
 } from "@veloxedge/bandit-engine";
 import { edgeKvEmulator } from "@/lib/edge/edgeKvEmulator";
 
@@ -25,7 +25,7 @@ function proxyHeaders(): HeadersInit {
 
 async function proxyToEdgeworker(
   endpoint: string,
-  payload: EdgeUpdateRequest,
+  payload: EdgeResolveRequest,
 ): Promise<NextResponse> {
   const response = await fetch(endpoint, {
     method: "POST",
@@ -44,23 +44,22 @@ async function proxyToEdgeworker(
 }
 
 export async function POST(request: NextRequest) {
-  let payload: EdgeUpdateRequest;
+  let payload: EdgeResolveRequest;
 
   try {
-    payload = (await request.json()) as EdgeUpdateRequest;
+    payload = (await request.json()) as EdgeResolveRequest;
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const endpoint = edgeworkerEndpoint("/update");
+  const endpoint = edgeworkerEndpoint("/resolve");
   if (endpoint) return proxyToEdgeworker(endpoint, payload);
 
   try {
-    const response = await edgeKvEmulator.update(payload);
+    const response = await edgeKvEmulator.resolve(payload);
     return NextResponse.json(response);
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown emulator failure";
+    const message = error instanceof Error ? error.message : "Unknown emulator failure";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
