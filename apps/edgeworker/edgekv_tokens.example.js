@@ -1,4 +1,11 @@
-// Example EdgeKV token placeholder.
-// Generate the real gitignored edgekv_tokens.js with the Akamai CLI before bundling for deployment.
+// Copy to edgekv_tokens.js after creating an EdgeKV access token with the Akamai CLI.
+// The real edgekv_tokens.js contains secrets and is intentionally gitignored.
 
-export default {};
+export const edgekv_access_tokens = {
+  "namespace-veloxedge": {
+    name: "namespace-veloxedge",
+    value: "REPLACE_WITH_AKAMAI_EDGEKV_ACCESS_TOKEN",
+  },
+};
+
+export default edgekv_access_tokens;
