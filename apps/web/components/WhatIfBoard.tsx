@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { ACTIONS, actionCopy } from './dashboardData';
+import { ACTIONS, actionCopy } from "./dashboardData";
 
 interface WhatIfBoardProps {
   alpha?: number;
@@ -13,12 +13,17 @@ interface WhatIfBoardProps {
 export default function WhatIfBoard({
   alpha = 1.05,
   onAlphaChange,
-  activeAction = 'TOOL_CONTEXT',
+  activeAction = "TOOL_CONTEXT",
   dimensions = 12,
   ready = false,
 }: WhatIfBoardProps) {
   const active = actionCopy(activeAction);
-  const explorationMode = alpha < 0.8 ? 'Exploit learned winner' : alpha > 1.45 ? 'Probe uncertain arms' : 'Balanced edge budget';
+  const explorationMode =
+    alpha < 0.8
+      ? "Exploit learned winner"
+      : alpha > 1.45
+        ? "Probe uncertain arms"
+        : "Balanced edge budget";
 
   return (
     <article className="whatif-card">
@@ -56,8 +61,12 @@ export default function WhatIfBoard({
         </div>
         <div>
           <span>Engine source</span>
-          <strong>{ready ? 'LinUCB hook' : 'UI fallback'}</strong>
-          <em>{ready ? 'Agent B telemetry connected' : 'awaiting integration worktree'}</em>
+          <strong>{ready ? "LinUCB hook" : "UI fallback"}</strong>
+          <em>
+            {ready
+              ? "live telemetry connected"
+              : "synthetic fallback before hydration"}
+          </em>
         </div>
       </div>
 
@@ -66,8 +75,15 @@ export default function WhatIfBoard({
           const copy = actionCopy(action);
           return (
             <span
-              className={action === activeAction ? 'arm-chip arm-chip-active' : 'arm-chip'}
-              style={{ borderColor: copy.accent, color: action === activeAction ? copy.accent : undefined }}
+              className={
+                action === activeAction
+                  ? "arm-chip arm-chip-active"
+                  : "arm-chip"
+              }
+              style={{
+                borderColor: copy.accent,
+                color: action === activeAction ? copy.accent : undefined,
+              }}
               key={action}
             >
               {copy.shortLabel}

@@ -1,18 +1,18 @@
-'use client';
+"use client";
 
-import { useMemo, useReducer, useState } from 'react';
-import type { EngineSnapshot } from '@veloxedge/bandit-engine';
-import { useVeloxEngine } from '@/hooks/useVeloxEngine';
-import type { InterceptorEvent } from '@/hooks/useVeloxEngine';
-import { journeys as scriptedJourneys } from '@/lib/simulation';
-import type { Journey, JourneyStep, LatencyStats } from '@/lib/simulation';
-import Console from '@/components/Console';
-import InterceptorOverlay from '@/components/InterceptorOverlay';
-import LatencyPanel from '@/components/LatencyPanel';
-import CounterCards from '@/components/CounterCards';
-import CovarianceHeatmap from '@/components/CovarianceHeatmap';
-import ConvergenceChart from '@/components/ConvergenceChart';
-import WhatIfBoard from '@/components/WhatIfBoard';
+import { useMemo, useReducer, useState } from "react";
+import type { EngineSnapshot } from "@veloxedge/bandit-engine";
+import { useVeloxEngine } from "@/hooks/useVeloxEngine";
+import type { InterceptorEvent } from "@/hooks/useVeloxEngine";
+import { journeys as scriptedJourneys } from "@/lib/simulation";
+import type { Journey, JourneyStep, LatencyStats } from "@/lib/simulation";
+import Console from "@/components/Console";
+import InterceptorOverlay from "@/components/InterceptorOverlay";
+import LatencyPanel from "@/components/LatencyPanel";
+import CounterCards from "@/components/CounterCards";
+import CovarianceHeatmap from "@/components/CovarianceHeatmap";
+import ConvergenceChart from "@/components/ConvergenceChart";
+import WhatIfBoard from "@/components/WhatIfBoard";
 import {
   ACTIONS,
   DEFAULT_ALPHA,
@@ -23,13 +23,12 @@ import {
   classifyPromptAction,
   createDemoSnapshot,
   createEmptyStats,
-  deriveTimelineFromStats,
   initialConvergence,
   initialTimeline,
   snapshotToConvergencePoint,
   type ConvergencePoint,
   type TimelinePoint,
-} from '@/components/dashboardData';
+} from "@/components/dashboardData";
 
 interface DemoState {
   tick: number;
@@ -43,53 +42,85 @@ interface DemoState {
 }
 
 type DemoAction =
-  | { type: 'step'; journey: Journey; prompt?: string; step?: JourneyStep; alpha: number }
-  | { type: 'alpha'; alpha: number }
-  | { type: 'reset'; alpha: number };
+  | {
+      type: "step";
+      journey: Journey;
+      prompt?: string;
+      step?: JourneyStep;
+      alpha: number;
+    }
+  | { type: "alpha"; alpha: number }
+  | { type: "reset"; alpha: number };
 
 function createInitialDemoState(alpha: number): DemoState {
-  const snapshot = createDemoSnapshot(alpha, 0, 'TOOL_CONTEXT');
+  const snapshot = createDemoSnapshot(alpha, 0, "TOOL_CONTEXT");
   return {
     tick: 0,
     stats: createEmptyStats(),
-    events: buildFallbackEvents(0, 'TOOL_CONTEXT', 'Awaiting first latent trajectory', true),
+    events: buildFallbackEvents(
+      0,
+      "TOOL_CONTEXT",
+      "Awaiting first latent trajectory",
+      true,
+    ),
     snapshot,
     timeline: initialTimeline(),
     convergence: initialConvergence(),
-    lastAction: 'TOOL_CONTEXT',
-    activeStepLabel: 'Awaiting first latent trajectory',
+    lastAction: "TOOL_CONTEXT",
+    activeStepLabel: "Awaiting first latent trajectory",
   };
 }
 
 function chooseMissAction(bestAction: string, tick: number): string {
   const options = ACTIONS.filter((action) => action !== bestAction);
-  return options[tick % options.length] ?? 'NO_OP';
+  return options[tick % options.length] ?? "NO_OP";
 }
 
 function demoReducer(state: DemoState, action: DemoAction): DemoState {
-  if (action.type === 'reset') return createInitialDemoState(action.alpha);
-  if (action.type === 'alpha') {
-    const snapshot = createDemoSnapshot(action.alpha, state.tick, state.lastAction);
+  if (action.type === "reset") return createInitialDemoState(action.alpha);
+  if (action.type === "alpha") {
+    const snapshot = createDemoSnapshot(
+      action.alpha,
+      state.tick,
+      state.lastAction,
+    );
     return {
       ...state,
       snapshot,
-      convergence: [...state.convergence.slice(-15), snapshotToConvergencePoint(snapshot, state.tick)],
+      convergence: [
+        ...state.convergence.slice(-15),
+        snapshotToConvergencePoint(snapshot, state.tick),
+      ],
     };
   }
 
   const nextTick = state.tick + 1;
-  const steps = action.journey.steps.length > 0 ? action.journey.steps : DEMO_JOURNEYS[0].steps;
-  const journeyStep = action.step ?? steps[state.tick % steps.length] ?? DEMO_JOURNEYS[0].steps[0];
-  const prompt = action.prompt?.trim() ?? '';
-  const bestAction = prompt.length > 0 ? classifyPromptAction(prompt) : journeyStep.bestAction;
+  const steps =
+    action.journey.steps.length > 0
+      ? action.journey.steps
+      : DEMO_JOURNEYS[0].steps;
+  const journeyStep =
+    action.step ??
+    steps[state.tick % steps.length] ??
+    DEMO_JOURNEYS[0].steps[0];
+  const prompt = action.prompt?.trim() ?? "";
+  const bestAction =
+    prompt.length > 0 ? classifyPromptAction(prompt) : journeyStep.bestAction;
   const warmedUp = nextTick > 1;
   const explorationMiss = action.alpha > 1.55 && nextTick % 4 === 0;
-  const budgetGuard = bestAction === 'NO_OP';
+  const budgetGuard = bestAction === "NO_OP";
   const cacheHit = warmedUp && !explorationMiss && !budgetGuard;
-  const predictedAction = cacheHit ? bestAction : chooseMissAction(bestAction, nextTick);
-  const coldFetchMs = Math.max(620, journeyStep.coldFetchMs + (prompt.length % 5) * 18);
+  const predictedAction = cacheHit
+    ? bestAction
+    : chooseMissAction(bestAction, nextTick);
+  const coldFetchMs = Math.max(
+    620,
+    journeyStep.coldFetchMs + (prompt.length % 5) * 18,
+  );
   const naiveLatency = coldFetchMs + 42 + (nextTick % 3) * 24;
-  const veloxLatency = cacheHit ? FALLBACK_EDGE_HIT_MS + (nextTick % 2) * 3 : coldFetchMs + 78;
+  const veloxLatency = cacheHit
+    ? FALLBACK_EDGE_HIT_MS + (nextTick % 2) * 3
+    : coldFetchMs + 78;
   const savedMs = Math.max(0, naiveLatency - veloxLatency);
   const stats: LatencyStats = {
     totalSteps: state.stats.totalSteps + 1,
@@ -100,12 +131,16 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
     veloxTotalMs: state.stats.veloxTotalMs + veloxLatency,
   };
   const snapshot = createDemoSnapshot(action.alpha, nextTick, predictedAction);
-  const label = prompt.length > 0 ? `Free-text prompt: ${prompt}` : journeyStep.label;
+  const label =
+    prompt.length > 0 ? `Free-text prompt: ${prompt}` : journeyStep.label;
 
   return {
     tick: nextTick,
     stats,
-    events: [...buildFallbackEvents(nextTick, predictedAction, label, cacheHit), ...state.events].slice(0, 18),
+    events: [
+      ...buildFallbackEvents(nextTick, predictedAction, label, cacheHit),
+      ...state.events,
+    ].slice(0, 18),
     snapshot,
     timeline: [
       ...state.timeline,
@@ -117,37 +152,71 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
         cacheHits: stats.cacheHits,
       },
     ].slice(-18),
-    convergence: [...state.convergence, snapshotToConvergencePoint(snapshot, stats.totalSteps)].slice(-18),
+    convergence: [
+      ...state.convergence,
+      snapshotToConvergencePoint(snapshot, stats.totalSteps),
+    ].slice(-18),
     lastAction: predictedAction,
     activeStepLabel: label,
   };
 }
 
-const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const delay = (milliseconds: number) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export default function Dashboard() {
   const engine = useVeloxEngine(12, DEFAULT_ALPHA);
-  const availableJourneys = scriptedJourneys.length > 0 ? scriptedJourneys : DEMO_JOURNEYS;
-  const [selectedJourneyId, setSelectedJourneyId] = useState(availableJourneys[0]?.id ?? DEMO_JOURNEYS[0].id);
-  const [prompt, setPrompt] = useState('Analyze Q4 churn, load the warehouse schema, then rank anomalous regions');
-  const [demo, dispatchDemo] = useReducer(demoReducer, DEFAULT_ALPHA, createInitialDemoState);
+  const availableJourneys =
+    scriptedJourneys.length > 0 ? scriptedJourneys : DEMO_JOURNEYS;
+  const [selectedJourneyId, setSelectedJourneyId] = useState(
+    availableJourneys[0]?.id ?? DEMO_JOURNEYS[0].id,
+  );
+  const [prompt, setPrompt] = useState(
+    "Analyze Q4 churn, load the warehouse schema, then rank anomalous regions",
+  );
+  const [demo, dispatchDemo] = useReducer(
+    demoReducer,
+    DEFAULT_ALPHA,
+    createInitialDemoState,
+  );
   const [fallbackAlpha, setFallbackAlpha] = useState(DEFAULT_ALPHA);
   const [isRunning, setIsRunning] = useState(false);
 
   const selectedJourney = useMemo(() => {
-    return availableJourneys.find((journey) => journey.id === selectedJourneyId) ?? availableJourneys[0] ?? DEMO_JOURNEYS[0];
+    return (
+      availableJourneys.find((journey) => journey.id === selectedJourneyId) ??
+      availableJourneys[0] ??
+      DEMO_JOURNEYS[0]
+    );
   }, [availableJourneys, selectedJourneyId]);
 
-  const hasRealTelemetry = engine.ready || engine.stats.totalSteps > 0 || engine.events.length > 0 || engine.snapshot !== null;
+  const hasRealTelemetry =
+    engine.ready ||
+    engine.stats.totalSteps > 0 ||
+    engine.events.length > 0 ||
+    engine.snapshot !== null;
   const alpha = hasRealTelemetry ? engine.alpha : fallbackAlpha;
   const displayStats = hasRealTelemetry ? engine.stats : demo.stats;
-  const displaySnapshot = (hasRealTelemetry ? engine.snapshot : demo.snapshot) ?? demo.snapshot;
-  const displayEvents = hasRealTelemetry && engine.events.length > 0 ? engine.events : demo.events;
-  const displayTimeline = hasRealTelemetry && engine.stats.totalSteps > 0 ? deriveTimelineFromStats(engine.stats) : demo.timeline;
-  const displayConvergence = hasRealTelemetry
-    ? [snapshotToConvergencePoint(displaySnapshot, Math.max(0, displayStats.totalSteps))]
-    : demo.convergence;
-  const activeAction = displaySnapshot.lastUcb[0]?.action ?? demo.lastAction;
+  const displaySnapshot =
+    (hasRealTelemetry ? engine.snapshot : demo.snapshot) ?? demo.snapshot;
+  const displayEvents =
+    hasRealTelemetry && engine.events.length > 0 ? engine.events : demo.events;
+  const displayTimeline =
+    hasRealTelemetry && engine.timeline.length > 0
+      ? engine.timeline
+      : demo.timeline;
+  const displayConvergence =
+    hasRealTelemetry && engine.snapshotHistory.length > 1
+      ? engine.snapshotHistory.map(({ step, snapshot }) =>
+          snapshotToConvergencePoint(snapshot, step),
+        )
+      : demo.convergence;
+  const activeAction = hasRealTelemetry
+    ? engine.lastAction
+    : (displaySnapshot.lastUcb[0]?.action ?? demo.lastAction);
+  const activeStepLabel = hasRealTelemetry
+    ? engine.activeStepLabel
+    : demo.activeStepLabel;
   const improvement = calculateImprovement(displayStats);
 
   const runRealStep = async (input: string | number[]) => {
@@ -162,9 +231,22 @@ export default function Dashboard() {
 
   const handleStep = async () => {
     setIsRunning(true);
-    const input = prompt.trim() || selectedJourney.steps[demo.tick % Math.max(1, selectedJourney.steps.length)]?.contextVector || prompt;
+    const nextJourneyStep =
+      selectedJourney.steps[
+        displayStats.totalSteps % Math.max(1, selectedJourney.steps.length)
+      ];
+    const input =
+      prompt.trim().length > 0
+        ? prompt
+        : (nextJourneyStep?.contextVector ?? prompt);
     const usedRealEngine = await runRealStep(input);
-    if (!usedRealEngine) dispatchDemo({ type: 'step', journey: selectedJourney, prompt, alpha: fallbackAlpha });
+    if (!usedRealEngine)
+      dispatchDemo({
+        type: "step",
+        journey: selectedJourney,
+        prompt,
+        alpha: fallbackAlpha,
+      });
     setIsRunning(false);
   };
 
@@ -181,9 +263,17 @@ export default function Dashboard() {
     }
 
     if (!usedRealEngine) {
-      const steps = selectedJourney.steps.length > 0 ? selectedJourney.steps : DEMO_JOURNEYS[0].steps;
+      const steps =
+        selectedJourney.steps.length > 0
+          ? selectedJourney.steps
+          : DEMO_JOURNEYS[0].steps;
       for (const step of steps) {
-        dispatchDemo({ type: 'step', journey: selectedJourney, step, alpha: fallbackAlpha });
+        dispatchDemo({
+          type: "step",
+          journey: selectedJourney,
+          step,
+          alpha: fallbackAlpha,
+        });
         await delay(170);
       }
     }
@@ -198,12 +288,12 @@ export default function Dashboard() {
         // The Agent C fallback remains interactive until Agent B wires the hook.
       }
     }
-    dispatchDemo({ type: 'reset', alpha: fallbackAlpha });
+    dispatchDemo({ type: "reset", alpha: fallbackAlpha });
   };
 
   const handleAlphaChange = (newAlpha: number) => {
     setFallbackAlpha(newAlpha);
-    dispatchDemo({ type: 'alpha', alpha: newAlpha });
+    dispatchDemo({ type: "alpha", alpha: newAlpha });
     if (engine.ready) {
       try {
         engine.setAlpha(newAlpha);
@@ -221,14 +311,22 @@ export default function Dashboard() {
         <div className="brand-lockup">
           <span className="brand-sigil">VE</span>
           <div>
-            <p className="eyebrow">Predictive edge cache for agentic workflows</p>
+            <p className="eyebrow">
+              Predictive edge cache for agentic workflows
+            </p>
             <h1>VeloxEdge</h1>
           </div>
         </div>
         <div className="hero-metrics" aria-label="Session summary">
-          <span><strong>{displayStats.totalSteps}</strong> turns observed</span>
-          <span><strong>{improvement.toFixed(0)}%</strong> latency dividend</span>
-          <span><strong>{alpha.toFixed(2)}</strong> α exploration</span>
+          <span>
+            <strong>{displayStats.totalSteps}</strong> turns observed
+          </span>
+          <span>
+            <strong>{improvement.toFixed(0)}%</strong> latency dividend
+          </span>
+          <span>
+            <strong>{alpha.toFixed(2)}</strong> α exploration
+          </span>
         </div>
       </header>
 
@@ -238,7 +336,12 @@ export default function Dashboard() {
             <span>A · Latency Analytics</span>
             <em>Naive cache vs speculative LinUCB prefetch</em>
           </div>
-          <CounterCards stats={displayStats} improvement={improvement} activeAction={activeAction} ready={engine.ready} />
+          <CounterCards
+            stats={displayStats}
+            improvement={improvement}
+            activeAction={activeAction}
+            ready={engine.ready}
+          />
           <LatencyPanel data={displayTimeline} improvement={improvement} />
         </section>
 
@@ -259,12 +362,12 @@ export default function Dashboard() {
             isRunning={isRunning}
             ready={engine.ready}
             alpha={alpha}
-            activeStepLabel={demo.activeStepLabel}
+            activeStepLabel={activeStepLabel}
           />
           <InterceptorOverlay
             events={displayEvents}
             activeAction={activeAction}
-            activeStepLabel={hasRealTelemetry ? 'Live hook telemetry' : demo.activeStepLabel}
+            activeStepLabel={activeStepLabel}
             ready={engine.ready}
           />
         </section>
@@ -274,7 +377,10 @@ export default function Dashboard() {
             <span>B · Math Co-processor</span>
             <em>Variance collapse, θ̂ convergence, exploration control</em>
           </div>
-          <CovarianceHeatmap snapshot={displaySnapshot} activeAction={activeAction} />
+          <CovarianceHeatmap
+            snapshot={displaySnapshot}
+            activeAction={activeAction}
+          />
           <ConvergenceChart data={displayConvergence} />
           <WhatIfBoard
             alpha={alpha}

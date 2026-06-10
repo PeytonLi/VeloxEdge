@@ -1,7 +1,13 @@
-'use client';
+"use client";
 
-import type { LatencyStats } from '@/lib/simulation';
-import { actionCopy, calculateImprovement, createEmptyStats, formatMs, formatNumber } from './dashboardData';
+import type { LatencyStats } from "@/lib/simulation";
+import {
+  actionCopy,
+  calculateImprovement,
+  createEmptyStats,
+  formatMs,
+  formatNumber,
+} from "./dashboardData";
 
 interface CounterCardsProps {
   stats?: LatencyStats;
@@ -13,35 +19,38 @@ interface CounterCardsProps {
 export default function CounterCards({
   stats = createEmptyStats(),
   improvement = calculateImprovement(stats),
-  activeAction = 'TOOL_CONTEXT',
+  activeAction = "TOOL_CONTEXT",
   ready = false,
 }: CounterCardsProps) {
-  const hitRate = stats.totalSteps === 0 ? 0 : (stats.cacheHits / stats.totalSteps) * 100;
+  const hitRate =
+    stats.totalSteps === 0 ? 0 : (stats.cacheHits / stats.totalSteps) * 100;
   const active = actionCopy(activeAction);
   const cards = [
     {
-      label: 'Edge Hits',
+      label: "Edge Hits",
       value: formatNumber(stats.cacheHits),
       detail: `${hitRate.toFixed(0)}% hit confidence`,
-      tone: 'cyan',
+      tone: "cyan",
     },
     {
-      label: 'Cold Pulls',
+      label: "Cold Pulls",
       value: formatNumber(stats.coldFetches),
-      detail: 'origin round-trips avoided after warmup',
-      tone: 'amber',
+      detail: "origin round-trips avoided after warmup",
+      tone: "amber",
     },
     {
-      label: 'Time-Saved Dividend',
+      label: "Time-Saved Dividend",
       value: formatMs(stats.totalSavedMs),
       detail: `${formatMs(stats.naiveTotalMs)} naive baseline`,
-      tone: 'lime',
+      tone: "lime",
     },
     {
-      label: 'Improvement',
+      label: "Improvement",
       value: `${Math.max(0, improvement).toFixed(0)}%`,
-      detail: ready ? 'live engine telemetry' : 'UI demo fallback until hook lands',
-      tone: 'blue',
+      detail: ready
+        ? "live engine telemetry"
+        : "synthetic pre-hydration fallback",
+      tone: "blue",
     },
   ];
 
@@ -56,7 +65,10 @@ export default function CounterCards({
       </div>
       <div className="counter-grid">
         {cards.map((card) => (
-          <article className={`metric-card metric-${card.tone}`} key={card.label}>
+          <article
+            className={`metric-card metric-${card.tone}`}
+            key={card.label}
+          >
             <span>{card.label}</span>
             <strong>{card.value}</strong>
             <em>{card.detail}</em>

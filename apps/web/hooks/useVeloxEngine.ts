@@ -1,11 +1,14 @@
-'use client';
+"use client";
 // ═══════════════════════════════════════════════════════════════
 // FROZEN CONTRACT (signature) — Agent B fills implementation.
 // ═══════════════════════════════════════════════════════════════
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { LinUCBEngine } from '@veloxedge/bandit-engine';
-import type { EngineSnapshot, PredictionResult } from '@veloxedge/bandit-engine';
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LinUCBEngine } from "@veloxedge/bandit-engine";
+import type {
+  EngineSnapshot,
+  PredictionResult,
+} from "@veloxedge/bandit-engine";
 import {
   COLD_FETCH_MS,
   NaiveStringCache,
@@ -14,27 +17,48 @@ import {
   embed,
   emptyStats,
   journeys,
-} from '@/lib/simulation';
-import type { JourneyStep, LatencyStats } from '@/lib/simulation';
+} from "@/lib/simulation";
+import type { JourneyStep, LatencyStats } from "@/lib/simulation";
 
 export interface InterceptorEvent {
   timestamp: number; // ms since session start
-  message: string;   // overlay stream line (e.g. "[014ms] Action: Pre-fetch DB Schema")
+  message: string; // overlay stream line (e.g. "[014ms] Action: Pre-fetch DB Schema")
   action: string;
   cacheHit: boolean;
+}
+
+export interface TelemetryPoint {
+  step: number;
+  naive: number;
+  velox: number;
+  saved: number;
+  cacheHits: number;
+}
+
+export interface SnapshotTelemetryPoint {
+  step: number;
+  snapshot: EngineSnapshot;
 }
 
 export interface VeloxEngineState {
   /** Bandit internal state for the math co-processor panels. */
   snapshot: EngineSnapshot | null;
+  /** Historical snapshots for θ̂ convergence visualisation. */
+  snapshotHistory: SnapshotTelemetryPoint[];
   /** Running latency statistics for Section A counters. */
   stats: LatencyStats;
+  /** Exact cumulative latency points for the timeline chart. */
+  timeline: TelemetryPoint[];
   /** Recent interceptor events for the Section C overlay stream. */
   events: InterceptorEvent[];
   /** Current α (may change via the What-If slider). */
   alpha: number;
   /** Whether the engine has been initialized. */
   ready: boolean;
+  /** Label for the most recent latent agent step. */
+  activeStepLabel: string;
+  /** Last arm selected by the live LinUCB engine. */
+  lastAction: string;
 }
 
 export interface VeloxEngineActions {
@@ -54,7 +78,20 @@ export interface VeloxEngineActions {
 const DEFAULT_DIMENSIONS = 12;
 const DEFAULT_ALPHA = 1;
 const MAX_EVENTS = 80;
-const ACTIONS = ['TOOL_CONTEXT', 'EDGEKV_MEMORY', 'VECTOR_WEIGHTS', 'NO_OP'];
+const MAX_HISTORY = 64;
+const ACTIONS = ["TOOL_CONTEXT", "EDGEKV_MEMORY", "VECTOR_WEIGHTS", "NO_OP"];
+const DEFAULT_ACTION = ACTIONS[0];
+const INITIAL_STEP_LABEL = "Awaiting first latent trajectory";
+
+function createInitialTelemetryPoint(): TelemetryPoint {
+  return {
+    step: 0,
+    naive: 0,
+    velox: 0,
+    saved: 0,
+    cacheHits: 0,
+  };
+}
 
 interface Scenario {
   contextVector: number[];
@@ -70,7 +107,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function clockNow(): number {
-  return typeof performance === 'undefined' ? Date.now() : performance.now();
+  return typeof performance === "undefined" ? Date.now() : performance.now();
 }
 
 function elapsedMs(sessionStart: number): number {
@@ -78,11 +115,13 @@ function elapsedMs(sessionStart: number): number {
 }
 
 function formatTimestamp(timestamp: number): string {
-  return String(Math.max(0, Math.round(timestamp))).padStart(3, '0');
+  return String(Math.max(0, Math.round(timestamp))).padStart(3, "0");
 }
 
 function resizeVector(values: number[], dimensions: number): number[] {
-  const vector = values.slice(0, dimensions).map((value) => (Number.isFinite(value) ? value : 0));
+  const vector = values
+    .slice(0, dimensions)
+    .map((value) => (Number.isFinite(value) ? value : 0));
   while (vector.length < dimensions) vector.push(0);
   return vector;
 }
@@ -90,7 +129,8 @@ function resizeVector(values: number[], dimensions: number): number[] {
 function dot(left: number[], right: number[]): number {
   const length = Math.min(left.length, right.length);
   let total = 0;
-  for (let index = 0; index < length; index += 1) total += left[index] * right[index];
+  for (let index = 0; index < length; index += 1)
+    total += left[index] * right[index];
   return total;
 }
 
@@ -106,34 +146,46 @@ function allJourneySteps(): JourneyStep[] {
   return journeys.flatMap((journey) => journey.steps);
 }
 
-function nearestJourneyStep(contextVector: number[], dimensions: number): JourneyStep {
+function nearestJourneyStep(
+  contextVector: number[],
+  dimensions: number,
+): JourneyStep {
   const steps = allJourneySteps();
   let bestStep = steps[0];
   let bestScore = -Infinity;
   const resizedContext = resizeVector(contextVector, dimensions);
 
   for (const step of steps) {
-    const score = cosineSimilarity(resizedContext, resizeVector(step.contextVector, dimensions));
+    const score = cosineSimilarity(
+      resizedContext,
+      resizeVector(step.contextVector, dimensions),
+    );
     if (score > bestScore) {
       bestScore = score;
       bestStep = step;
     }
   }
 
-  return bestStep ?? {
-    label: 'Fallback local reasoning step',
-    contextVector: resizedContext,
-    bestAction: 'NO_OP',
-    coldFetchMs: COLD_FETCH_MS,
-  };
+  return (
+    bestStep ?? {
+      label: "Fallback local reasoning step",
+      contextVector: resizedContext,
+      bestAction: "NO_OP",
+      coldFetchMs: COLD_FETCH_MS,
+    }
+  );
 }
 
 function normalizeInputLabel(input: string): string {
   const trimmed = input.trim();
-  return trimmed.length > 0 ? trimmed : 'Untitled live prompt';
+  return trimmed.length > 0 ? trimmed : "Untitled live prompt";
 }
 
-function resolveScenario(input: string | number[], dimensions: number, turn: number): Scenario {
+function resolveScenario(
+  input: string | number[],
+  dimensions: number,
+  turn: number,
+): Scenario {
   if (Array.isArray(input)) {
     const contextVector = resizeVector(input, dimensions);
     const step = nearestJourneyStep(contextVector, dimensions);
@@ -143,7 +195,7 @@ function resolveScenario(input: string | number[], dimensions: number, turn: num
       bestAction: step.bestAction,
       coldFetchMs: step.coldFetchMs,
       label: step.label,
-      naiveKey: step.label + ' :: latent-turn=' + String(turn),
+      naiveKey: step.label + " :: latent-turn=" + String(turn),
     };
   }
 
@@ -156,7 +208,7 @@ function resolveScenario(input: string | number[], dimensions: number, turn: num
     bestAction: step.bestAction,
     coldFetchMs: step.coldFetchMs,
     label,
-    naiveKey: label.toLowerCase() + ' :: json_args_nonce=' + String(turn),
+    naiveKey: label.toLowerCase() + " :: json_args_nonce=" + String(turn),
   };
 }
 
@@ -178,22 +230,24 @@ function safeSnapshot(engine: LinUCBEngine): EngineSnapshot | null {
 
 function actionLabel(action: string): string {
   switch (action) {
-    case 'TOOL_CONTEXT':
-      return 'Pre-fetch tool context';
-    case 'EDGEKV_MEMORY':
-      return 'Pre-fetch EdgeKV memory';
-    case 'VECTOR_WEIGHTS':
-      return 'Pre-fetch vector weights';
-    case 'NO_OP':
-      return 'Hold cache line (NO_OP)';
+    case "TOOL_CONTEXT":
+      return "Pre-fetch tool context";
+    case "EDGEKV_MEMORY":
+      return "Pre-fetch EdgeKV memory";
+    case "VECTOR_WEIGHTS":
+      return "Pre-fetch vector weights";
+    case "NO_OP":
+      return "Hold cache line (NO_OP)";
     default:
       return action;
   }
 }
 
 function winningScore(prediction: PredictionResult): string {
-  const winner = prediction.ucbBreakdown.find((entry) => entry.action === prediction.action);
-  return winner === undefined ? 'n/a' : winner.ucbValue.toFixed(3);
+  const winner = prediction.ucbBreakdown.find(
+    (entry) => entry.action === prediction.action,
+  );
+  return winner === undefined ? "n/a" : winner.ucbValue.toFixed(3);
 }
 
 function buildEvents(
@@ -204,26 +258,38 @@ function buildEvents(
   naiveAction: string | null,
 ): InterceptorEvent[] {
   const action = prediction.action;
-  const baseline = naiveAction === null ? 'Naive cache MISS' : 'Naive cache HIT for ' + actionLabel(naiveAction);
+  const baseline =
+    naiveAction === null
+      ? "Naive cache MISS"
+      : "Naive cache HIT for " + actionLabel(naiveAction);
   const outcome = result.cacheHit
-    ? 'Local Cache Populated @ Akamai Edge in ' + String(result.latencyMs) + 'ms'
-    : 'Origin cold pull: expected ' + actionLabel(scenario.bestAction) + ', paid ' + String(result.latencyMs) + 'ms';
+    ? "Local Cache Populated @ Akamai Edge in " +
+      String(result.latencyMs) +
+      "ms"
+    : "Origin cold pull: expected " +
+      actionLabel(scenario.bestAction) +
+      ", paid " +
+      String(result.latencyMs) +
+      "ms";
 
   const event = (offset: number, message: string): InterceptorEvent => {
     const timestamp = baseTimestamp + offset;
     return {
       timestamp,
-      message: '[' + formatTimestamp(timestamp) + 'ms] ' + message,
+      message: "[" + formatTimestamp(timestamp) + "ms] " + message,
       action,
       cacheHit: result.cacheHit,
     };
   };
 
   return [
-    event(0, 'Logit Stream Checked → ' + baseline),
-    event(4, 'State Vector Identified → ' + scenario.label),
-    event(9, 'Action: ' + actionLabel(action) + ' → UCB ' + winningScore(prediction)),
-    event(14, outcome + ' → reward ' + result.reward.toFixed(3)),
+    event(0, "Logit Stream Checked → " + baseline),
+    event(4, "State Vector Identified → " + scenario.label),
+    event(
+      9,
+      "Action: " + actionLabel(action) + " → UCB " + winningScore(prediction),
+    ),
+    event(14, outcome + " → reward " + result.reward.toFixed(3)),
   ];
 }
 
@@ -246,30 +312,52 @@ export function useVeloxEngine(
 ): VeloxEngineState & VeloxEngineActions {
   const dimensions = Math.max(1, Math.floor(_dimensions ?? DEFAULT_DIMENSIONS));
   const [snapshot, setSnapshot] = useState<EngineSnapshot | null>(null);
+  const [snapshotHistory, setSnapshotHistory] = useState<
+    SnapshotTelemetryPoint[]
+  >([]);
   const [stats, setStats] = useState<LatencyStats>(() => emptyStats());
+  const [timeline, setTimeline] = useState<TelemetryPoint[]>(() => [
+    createInitialTelemetryPoint(),
+  ]);
   const [events, setEvents] = useState<InterceptorEvent[]>([]);
-  const [alpha, setAlphaState] = useState(() => clamp(_alpha ?? DEFAULT_ALPHA, 0.05, 4));
+  const [alpha, setAlphaState] = useState(() =>
+    clamp(_alpha ?? DEFAULT_ALPHA, 0.05, 4),
+  );
   const [ready, setReady] = useState(false);
+  const [activeStepLabel, setActiveStepLabel] = useState(INITIAL_STEP_LABEL);
+  const [lastAction, setLastAction] = useState(DEFAULT_ACTION);
 
   const engineRef = useRef<LinUCBEngine | null>(null);
   const naiveCacheRef = useRef(new NaiveStringCache());
+  const statsRef = useRef<LatencyStats>(emptyStats());
+  const lastContextRef = useRef<number[] | null>(null);
   const sessionStartRef = useRef(clockNow());
   const turnRef = useRef(0);
 
   useEffect(() => {
     const engine = createEngine(dimensions, alpha);
+    const initialSnapshot = safeSnapshot(engine);
+    const initialStats = emptyStats();
+
     engineRef.current = engine;
     naiveCacheRef.current.clear();
+    statsRef.current = initialStats;
+    lastContextRef.current = null;
     sessionStartRef.current = clockNow();
     turnRef.current = 0;
-    setSnapshot(safeSnapshot(engine));
-    setStats(emptyStats());
+    setSnapshot(initialSnapshot);
+    setSnapshotHistory(
+      initialSnapshot ? [{ step: 0, snapshot: initialSnapshot }] : [],
+    );
+    setStats(initialStats);
+    setTimeline([createInitialTelemetryPoint()]);
     setEvents([]);
+    setActiveStepLabel(INITIAL_STEP_LABEL);
+    setLastAction(DEFAULT_ACTION);
     setReady(true);
 
     return () => {
       engineRef.current = null;
-      setReady(false);
     };
   }, [dimensions]);
 
@@ -289,25 +377,73 @@ export function useVeloxEngine(
 
       try {
         const prediction = engine.predictNextAction(scenario.contextVector);
-        const result = computeLatency(prediction.action, scenario.bestAction, scenario.coldFetchMs);
+        const result = computeLatency(
+          prediction.action,
+          scenario.bestAction,
+          scenario.coldFetchMs,
+        );
 
         naiveCacheRef.current.set(scenario.naiveKey, scenario.bestAction);
-        engine.updateWeights(prediction.action, scenario.contextVector, result.reward);
+        engine.updateWeights(
+          prediction.action,
+          scenario.contextVector,
+          result.reward,
+        );
         turnRef.current = turn + 1;
+        lastContextRef.current = [...scenario.contextVector];
 
-        setStats((currentStats) => accumulateStats(currentStats, result));
-        setSnapshot(safeSnapshot(engine));
+        const nextStats = accumulateStats(statsRef.current, result);
+        statsRef.current = nextStats;
+        const nextSnapshot = safeSnapshot(engine);
+
+        setStats(nextStats);
+        setTimeline((currentTimeline) =>
+          currentTimeline
+            .concat({
+              step: nextStats.totalSteps,
+              naive: nextStats.naiveTotalMs,
+              velox: nextStats.veloxTotalMs,
+              saved: nextStats.totalSavedMs,
+              cacheHits: nextStats.cacheHits,
+            })
+            .slice(-MAX_HISTORY),
+        );
+        setSnapshot(nextSnapshot);
+        if (nextSnapshot) {
+          setSnapshotHistory((currentHistory) =>
+            currentHistory
+              .concat({ step: nextStats.totalSteps, snapshot: nextSnapshot })
+              .slice(-MAX_HISTORY),
+          );
+        }
+        setActiveStepLabel(scenario.label);
+        setLastAction(prediction.action);
         setEvents((currentEvents) =>
-          currentEvents.concat(buildEvents(baseTimestamp, scenario, prediction, result, naiveAction)).slice(-MAX_EVENTS),
+          currentEvents
+            .concat(
+              buildEvents(
+                baseTimestamp,
+                scenario,
+                prediction,
+                result,
+                naiveAction,
+              ),
+            )
+            .slice(-MAX_EVENTS),
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unknown engine failure';
+        const message =
+          error instanceof Error ? error.message : "Unknown engine failure";
         setEvents((currentEvents) =>
           currentEvents
             .concat({
               timestamp: baseTimestamp,
-              message: '[' + formatTimestamp(baseTimestamp) + 'ms] Engine unavailable → ' + message,
-              action: 'NO_OP',
+              message:
+                "[" +
+                formatTimestamp(baseTimestamp) +
+                "ms] Engine unavailable → " +
+                message,
+              action: "NO_OP",
               cacheHit: false,
             })
             .slice(-MAX_EVENTS),
@@ -318,36 +454,59 @@ export function useVeloxEngine(
     [alpha, dimensions],
   );
 
-  const updateAlpha = useCallback(
-    (newAlpha: number): void => {
-      const nextAlpha = clamp(newAlpha, 0.05, 4);
-      setAlphaState(nextAlpha);
+  const updateAlpha = useCallback((newAlpha: number): void => {
+    const nextAlpha = clamp(newAlpha, 0.05, 4);
+    setAlphaState(nextAlpha);
 
-      const engine = engineRef.current;
-      if (engine === null) return;
+    const engine = engineRef.current;
+    if (engine === null) return;
 
-      const updatedEngine = engine.withAlpha(nextAlpha);
-      engineRef.current = updatedEngine;
-      setSnapshot(safeSnapshot(updatedEngine));
-    },
-    [],
-  );
+    const updatedEngine = engine.withAlpha(nextAlpha);
+    const lastContext = lastContextRef.current;
+    if (lastContext) {
+      const prediction = updatedEngine.predictNextAction(lastContext);
+      setLastAction(prediction.action);
+    }
+
+    const nextSnapshot = safeSnapshot(updatedEngine);
+    engineRef.current = updatedEngine;
+    setSnapshot(nextSnapshot);
+    if (nextSnapshot) {
+      setSnapshotHistory((currentHistory) =>
+        currentHistory
+          .concat({ step: statsRef.current.totalSteps, snapshot: nextSnapshot })
+          .slice(-MAX_HISTORY),
+      );
+    }
+  }, []);
 
   const reset = useCallback((): void => {
     const engine = createEngine(dimensions, alpha);
+    const initialSnapshot = safeSnapshot(engine);
+    const initialStats = emptyStats();
+
     engineRef.current = engine;
     naiveCacheRef.current.clear();
+    statsRef.current = initialStats;
+    lastContextRef.current = null;
     sessionStartRef.current = clockNow();
     turnRef.current = 0;
-    setSnapshot(safeSnapshot(engine));
-    setStats(emptyStats());
+    setSnapshot(initialSnapshot);
+    setSnapshotHistory(
+      initialSnapshot ? [{ step: 0, snapshot: initialSnapshot }] : [],
+    );
+    setStats(initialStats);
+    setTimeline([createInitialTelemetryPoint()]);
     setEvents([]);
+    setActiveStepLabel(INITIAL_STEP_LABEL);
+    setLastAction(DEFAULT_ACTION);
     setReady(true);
   }, [alpha, dimensions]);
 
   const runJourney = useCallback(
     async (journeyId: string, delayMs = 240): Promise<void> => {
-      const journey = journeys.find((candidate) => candidate.id === journeyId) ?? journeys[0];
+      const journey =
+        journeys.find((candidate) => candidate.id === journeyId) ?? journeys[0];
       if (journey === undefined) return;
 
       for (const journeyStep of journey.steps) {
@@ -360,10 +519,14 @@ export function useVeloxEngine(
 
   return {
     snapshot,
+    snapshotHistory,
     stats,
+    timeline,
     events,
     alpha,
     ready,
+    activeStepLabel,
+    lastAction,
     step,
     setAlpha: updateAlpha,
     reset,

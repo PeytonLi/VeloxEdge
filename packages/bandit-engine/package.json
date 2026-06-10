@@ -13,7 +13,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --experimental-vm-modules node_modules/.bin/jest --testEnvironment=node",
+    "test": "jest --testEnvironment=node",
     "lint": "tsc --noEmit"
   },
   "devDependencies": {
