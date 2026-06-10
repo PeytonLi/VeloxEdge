@@ -1,7 +1,56 @@
 # VeloxEdge EdgeWorker deploy runbook
 
 This directory builds a deployable Akamai EdgeWorkers bundle for the live
-VeloxEdge value loop. The worker exposes:
+VeloxEdge value loop.
+
+## Self-contained deployment (no EdgeWorkers required)
+
+When Akamai EdgeWorkers access is unavailable, the Next.js web app runs the
+full value loop locally via the built-in emulator. **No EdgeWorker activation
+is required** — the emulator provides real pre-fetch, hit/miss measurement,
+and reward computation identical to the EdgeWorker path.
+
+1. **Leave `VELOX_EDGEWORKER_URL` unset** in `.env` (or omit it entirely).
+2. **Deploy the Next.js app** to any Node.js host:
+   - **Vercel:** `vercel deploy` (or connect the repo for auto-deploy)
+   - **Akamai Connected Cloud (Linode):** standard Node.js 18+ deployment
+   - **Railway / Render / Fly.io:** point at the `apps/web` directory
+   - **Local dev:** `pnpm --filter web dev` → `http://localhost:3000`
+3. All `/api/edge/*` routes automatically use the local emulator when no
+   EdgeWorker URL is configured.
+4. The mock origin at `/api/origin/[asset]` serves real asset payloads with
+   cold-latency simulation, completing the real measured value loop.
+
+### What runs where (self-contained mode)
+
+```
+Browser (dashboard UI)
+  │ POST /api/edge/predict
+  ▼
+Next.js API route ──▶ edgeKvEmulator.predict()
+  │                      ├─ LinUCB engine (in-memory)
+  │                      ├─ fetch(/api/origin/[key]) → cache asset
+  │                      └─ write pending prediction
+  │
+  │ POST /api/edge/resolve
+  ▼
+Next.js API route ──▶ edgeKvEmulator.resolve()
+                         ├─ check in-memory asset cache → HIT/MISS
+                         ├─ reward = rewardFromLatency(measuredMs, edgeMs, coldMs)
+                         └─ engine.updateWeights(...) → sole bandit writer
+```
+
+### Optional: Akamai EdgeWorkers deployment
+
+If EdgeWorkers access is restored, set `VELOX_EDGEWORKER_URL` in `.env` and
+follow the deployment steps below. The API routes will automatically proxy to
+the real EdgeWorker instead of the emulator.
+
+---
+
+## EdgeWorker deployment (requires EdgeWorkers + EdgeKV access)
+
+The worker exposes:
 
 - `GET /health` — health check
 - `POST /predict` — read-only LinUCB prediction, origin prefetch, EdgeKV asset write, pending attribution write

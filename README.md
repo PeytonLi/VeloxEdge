@@ -80,15 +80,27 @@ This is fast enough to run natively on edge serverless infrastructure (≤1.8ms 
 ```
 veloxedge/
 ├── apps/
-│   └── web/                        # Next.js 15 App Router dashboard
-│       ├── app/page.tsx             # 3-zone live canvas (A / B / C)
-│       ├── components/              # Section components (Console, Heatmap, Charts…)
-│       ├── lib/simulation/          # Scripted journeys, latency model, naive cache baseline
-│       └── hooks/useVeloxEngine.ts  # React hook owning the engine + simulation state
+│   ├── edgeworker/                  # Akamai EdgeWorkers bundle (deployable)
+│   │   ├── src/main.js              # predict / resolve / update handlers
+│   │   ├── edgekv.js                # Vendored EdgeKV client helper
+│   │   └── DEPLOY.md                # Activation runbook (self-contained alt below)
+│   └── web/                         # Next.js 15 App Router dashboard
+│       ├── app/
+│       │   ├── page.tsx             # 3-zone live canvas (A / B / C)
+│       │   └── api/
+│       │       ├── edge/predict/    # Bandit prediction + prefetch endpoint
+│       │       ├── edge/resolve/    # Measured cache hit/miss + reward endpoint
+│       │       └── origin/[asset]/  # Mock origin serving real asset payloads
+│       ├── lib/
+│       │   ├── edge/                # Emulator, asset catalog, edge client, embeddings
+│       │   └── simulation/          # Scripted journeys, naive cache baseline
+│       └── hooks/useVeloxEngine.ts  # React hook owning the engine + real value loop
 └── packages/
     └── bandit-engine/               # Pure TypeScript LinUCB core (no React, no I/O)
-        ├── src/index.ts             # LinUCBEngine class
-        ├── src/linalg.ts            # Gauss-Jordan inversion, matVec, dot, variance
+        ├── src/index.ts             # LinUCBEngine class (Sherman-Morrison inverse)
+        ├── src/linalg.ts            # Matrix operations (invert, matVec, dot, variance)
+        ├── src/liveLoop.ts          # deriveAssetKey + rewardFromLatency (pure)
+        ├── src/edge.ts              # Frozen wire contract (DTOs, TTL constants)
         └── src/types.ts             # BanditConfig, EngineSnapshot, UcbBreakdown
 ```
 
@@ -123,7 +135,8 @@ veloxedge/
 | Charts | Recharts (line charts) + hand-rolled CSS-grid heatmap |
 | Bandit engine | Pure TypeScript, zero runtime dependencies |
 | Testing | Jest + ts-jest (unit tests on the engine) |
-| Edge target | Akamai EdgeWorkers + EdgeKV (simulated in-process) |
+| Edge runtime | Self-contained Next.js API routes (local emulator with real measured loop) |
+| Edge target (optional) | Akamai EdgeWorkers + EdgeKV (deployable bundle, requires EdgeWorkers access) |
 
 ---
 
@@ -155,7 +168,7 @@ The LinUCB engine is benchmarked as part of the test suite:
 | Metric | Target | Approach |
 |---|---|---|
 | Predict latency (d=12) | ≤ 1.8ms | Naïve Gauss-Jordan; O(d³) is trivial at d=12 |
-| Latency improvement vs naive cache | ≥ 45% | Simulated 800ms cold-fetch vs 5ms edge hit over 50 steps |
+| Latency improvement vs naive cache | ≥ 45% | Measured cold-fetch (~120ms) vs edge cache hit (~5ms) over 50 steps |
 | Matrix stability | Zero NaN/overflow | Identity regularisation (`A = DᵀD + I`) guarantees non-singularity |
 
 ---
@@ -209,8 +222,11 @@ Sherman-Morrison gives O(d²) incremental inverse updates vs O(d³) full recompu
 
 ## Roadmap
 
-- [ ] Real Akamai EdgeWorker + EdgeKV deployment
-- [ ] Live embedding integration (swap deterministic vectors for real inference embeddings)
-- [ ] Sherman-Morrison incremental inverse for O(d²) updates at larger d
-- [ ] Multi-agent session isolation (per-agent bandit state in EdgeKV namespaces)
+- [x] Real Akamai EdgeWorker + EdgeKV deployment (code complete; requires EdgeWorkers access to activate)
+- [x] Live embedding integration (pluggable adapter; deterministic default)
+- [x] Sherman-Morrison incremental inverse for O(d²) updates at larger d
+- [x] Multi-agent session isolation (per-session bandit state via sessionId scoping)
+- [x] Self-contained Next.js deployment (no EdgeWorker dependency required for full value loop)
+- [ ] Real embedding provider (OpenAI / Cohere via VELOX_EMBEDDING_* env)
 - [ ] Reward shaping beyond binary hit/miss (partial cache relevance scoring)
+- [ ] Geographic edge distribution (multi-region deploy)

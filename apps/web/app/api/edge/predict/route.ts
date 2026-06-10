@@ -43,7 +43,27 @@ async function proxyToEdgeworker(
   return NextResponse.json(body, { status: response.status });
 }
 
+function assertAuthorized(request: NextRequest): void {
+  const expectedSecret = process.env.VELOX_EDGE_SECRET?.trim();
+  if (!expectedSecret) return;
+
+  const received = request.headers.get(VELOX_EDGE_SECRET_HEADER)?.trim();
+  if (received !== expectedSecret) {
+    throw Object.assign(new Error("Missing or invalid edge secret"), {
+      status: 401,
+    });
+  }
+}
+
 export async function POST(request: NextRequest) {
+  try {
+    assertAuthorized(request);
+  } catch (error) {
+    const status = (error as { status?: number }).status ?? 401;
+    const message = error instanceof Error ? error.message : "Unauthorized";
+    return NextResponse.json({ error: message }, { status });
+  }
+
   let payload: EdgePredictRequest;
 
   try {
