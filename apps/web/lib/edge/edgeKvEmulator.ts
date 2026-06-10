@@ -24,7 +24,9 @@ function computeMicros(startedAt: number): number {
   return Math.max(0, Math.round((nowMs() - startedAt) * 1000));
 }
 
-function makeEngine(request: EdgePredictRequest | EdgeUpdateRequest): LinUCBEngine {
+function makeEngine(
+  request: EdgePredictRequest | EdgeUpdateRequest,
+): LinUCBEngine {
   return new LinUCBEngine({
     dimensions: request.dimensions,
     alpha: request.alpha,
@@ -43,7 +45,9 @@ function configMatches(
   );
 }
 
-function restoreEngine(request: EdgePredictRequest | EdgeUpdateRequest): LinUCBEngine {
+function restoreEngine(
+  request: EdgePredictRequest | EdgeUpdateRequest,
+): LinUCBEngine {
   const state = states.get(request.sessionId);
 
   if (state && configMatches(state, request)) {
@@ -61,7 +65,9 @@ function restoreEngine(request: EdgePredictRequest | EdgeUpdateRequest): LinUCBE
 
   const cached = engineFallbacks.get(request.sessionId);
   if (cached) {
-    return cached.getAlpha() === request.alpha ? cached : cached.withAlpha(request.alpha);
+    return cached.getAlpha() === request.alpha
+      ? cached
+      : cached.withAlpha(request.alpha);
   }
 
   return makeEngine(request);
@@ -96,13 +102,17 @@ export function createEdgeKvEmulator(): EdgeKvEmulator {
     async update(request) {
       const startedAt = nowMs();
       const engine = restoreEngine(request);
-      engine.updateWeights(request.action, request.contextVector, request.reward);
+      engine.updateWeights(
+        request.action,
+        request.contextVector,
+        request.reward,
+      );
       const prediction = engine.predictNextAction(request.contextVector);
       persistEngine(request.sessionId, engine);
 
       return {
         sessionId: request.sessionId,
-        action: request.action,
+        action: prediction.action,
         ucbBreakdown: prediction.ucbBreakdown,
         computeMicros: computeMicros(startedAt),
       };

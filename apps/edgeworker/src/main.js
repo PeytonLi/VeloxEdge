@@ -31,7 +31,10 @@ function errorResponse(status, code, message, details = undefined) {
 }
 
 function nowMicros() {
-  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+  if (
+    typeof performance !== "undefined" &&
+    typeof performance.now === "function"
+  ) {
     return performance.now() * 1000;
   }
 
@@ -80,29 +83,36 @@ async function readJsonBody(request) {
 function sanitizeSessionId(sessionId) {
   const normalized = String(sessionId ?? "").trim();
   if (!/^[A-Za-z0-9_-]{1,180}$/.test(normalized)) {
-    throw new Error("sessionId must be 1-180 characters using A-Z, a-z, 0-9, _ or -");
+    throw new Error(
+      "sessionId must be 1-180 characters using A-Z, a-z, 0-9, _ or -",
+    );
   }
 
   return SESSION_PREFIX + normalized;
 }
 
 function sanitizeConfig(payload) {
-  const dimensions = Number.isInteger(payload?.dimensions) && payload.dimensions > 0
-    ? payload.dimensions
-    : DEFAULT_CONFIG.dimensions;
-  const alpha = Number.isFinite(payload?.alpha) && payload.alpha >= 0
-    ? payload.alpha
-    : DEFAULT_CONFIG.alpha;
-  const actions = Array.isArray(payload?.actions) && payload.actions.length > 0
-    ? payload.actions.map(String)
-    : DEFAULT_CONFIG.actions;
+  const dimensions =
+    Number.isInteger(payload?.dimensions) && payload.dimensions > 0
+      ? payload.dimensions
+      : DEFAULT_CONFIG.dimensions;
+  const alpha =
+    Number.isFinite(payload?.alpha) && payload.alpha >= 0
+      ? payload.alpha
+      : DEFAULT_CONFIG.alpha;
+  const actions =
+    Array.isArray(payload?.actions) && payload.actions.length > 0
+      ? payload.actions.map(String)
+      : DEFAULT_CONFIG.actions;
 
   return { dimensions, alpha, actions };
 }
 
 function assertContextVector(contextVector, dimensions) {
   if (!Array.isArray(contextVector) || contextVector.length !== dimensions) {
-    throw new Error("contextVector must be an array with " + dimensions + " dimensions");
+    throw new Error(
+      "contextVector must be an array with " + dimensions + " dimensions",
+    );
   }
 
   if (!contextVector.every(Number.isFinite)) {
@@ -120,6 +130,23 @@ function freshSerializedState(config) {
   return new LinUCBEngine(config).serialize();
 }
 
+function stateMatchesConfig(state, config) {
+  return Boolean(
+    state &&
+    state.dimensions === config.dimensions &&
+    Array.isArray(state.actions) &&
+    state.actions.length === config.actions.length &&
+    state.actions.every((action, index) => action === config.actions[index]),
+  );
+}
+
+function restoreEngine(state, config) {
+  const engine = LinUCBEngine.deserialize(state);
+  return engine.getAlpha() === config.alpha
+    ? engine
+    : engine.withAlpha(config.alpha);
+}
+
 async function getEngineState(edgeKv, item, config) {
   const storedState = await edgeKv.getJson({
     item,
@@ -127,7 +154,9 @@ async function getEngineState(edgeKv, item, config) {
     timeout: EDGEKV_TIMEOUT_MS,
   });
 
-  return storedState ?? freshSerializedState(config);
+  return stateMatchesConfig(storedState, config)
+    ? storedState
+    : freshSerializedState(config);
 }
 
 async function putEngineState(edgeKv, item, state) {
@@ -160,7 +189,7 @@ async function handlePredict(request, payload) {
   const item = sanitizeSessionId(sessionId);
   const edgeKv = createEdgeKv(request);
   const state = await getEngineState(edgeKv, item, config);
-  const engine = LinUCBEngine.deserialize(state);
+  const engine = restoreEngine(state, config);
   const prediction = engine.predictNextAction(payload.contextVector);
 
   await putEngineState(edgeKv, item, engine.serialize());
@@ -183,9 +212,13 @@ async function handleUpdate(request, payload) {
   const item = sanitizeSessionId(sessionId);
   const edgeKv = createEdgeKv(request);
   const state = await getEngineState(edgeKv, item, config);
-  const engine = LinUCBEngine.deserialize(state);
+  const engine = restoreEngine(state, config);
 
-  engine.updateWeights(String(payload.action ?? ""), payload.contextVector, payload.reward);
+  engine.updateWeights(
+    String(payload.action ?? ""),
+    payload.contextVector,
+    payload.reward,
+  );
   const prediction = engine.predictNextAction(payload.contextVector);
   await putEngineState(edgeKv, item, engine.serialize());
 
@@ -204,7 +237,9 @@ async function handleReset(request, payload) {
   const item = sanitizeSessionId(sessionId);
   const edgeKv = createEdgeKv(request);
   const engine = new LinUCBEngine(config);
-  const prediction = engine.predictNextAction(new Array(config.dimensions).fill(0));
+  const prediction = engine.predictNextAction(
+    new Array(config.dimensions).fill(0),
+  );
 
   await putEngineState(edgeKv, item, engine.serialize());
 
@@ -225,7 +260,11 @@ export async function responseProvider(request) {
   }
 
   if (method !== "POST") {
-    return errorResponse(405, "method_not_allowed", "Use POST for /predict, /update, or /reset");
+    return errorResponse(
+      405,
+      "method_not_allowed",
+      "Use POST for /predict, /update, or /reset",
+    );
   }
 
   try {
