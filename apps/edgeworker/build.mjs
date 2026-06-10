@@ -5,9 +5,31 @@ import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(rootDir, "../..");
 const distDir = path.join(rootDir, "dist");
 const bundlePath = path.join(distDir, "bundle.tgz");
 const NULL_CHAR = String.fromCharCode(0);
+const EDGEWORKER_EXTERNALS = [
+  "create-response",
+  "http-request",
+  "cookies",
+  "text-encode-transform",
+  "url-search-params",
+  "streams",
+  "log",
+  "resolvable",
+  "./edgekv.js",
+  "./edgekv_tokens.js",
+];
+
+const workspaceSourcePlugin = {
+  name: "workspace-source",
+  setup(esbuild) {
+    esbuild.onResolve({ filter: /^@veloxedge\/bandit-engine$/ }, () => ({
+      path: path.join(repoRoot, "packages/bandit-engine/src/index.ts"),
+    }));
+  },
+};
 
 function writeString(buffer, offset, length, value) {
   buffer.write(String(value).slice(0, length), offset, length, "ascii");
@@ -65,21 +87,32 @@ await build({
   format: "esm",
   platform: "browser",
   target: "es2020",
-  external: [
-    "create-response",
-    "./edgekv.js",
-    "./edgekv_tokens.js",
-    "../edgekv.js",
-    "../edgekv_tokens.js",
-  ],
+  external: EDGEWORKER_EXTERNALS,
+  plugins: [workspaceSourcePlugin],
+  banner: {
+    js: "// VeloxEdge EdgeWorker bundle. edgekv.js and edgekv_tokens.js are sibling bundle modules.",
+  },
 });
 
 await copyFile(path.join(rootDir, "bundle.json"), path.join(distDir, "bundle.json"));
 await copyFile(path.join(rootDir, "edgekv.js"), path.join(distDir, "edgekv.js"));
-await writeFile(
-  path.join(distDir, "edgekv_tokens.js"),
-  "// Build-time placeholder. Replace with the Akamai-generated edgekv_tokens.js for deployment.\nexport default {};\n",
-);
+
+try {
+  await copyFile(
+    path.join(rootDir, "edgekv_tokens.js"),
+    path.join(distDir, "edgekv_tokens.js"),
+  );
+  console.log("Copied gitignored edgekv_tokens.js into dist bundle");
+} catch {
+  await writeFile(
+    path.join(distDir, "edgekv_tokens.js"),
+    `// Build-time placeholder. Replace with the Akamai-generated edgekv_tokens.js for deployment.
+export const edgekv_access_tokens = {};
+export default edgekv_access_tokens;
+`,
+  );
+  console.log("Wrote placeholder dist/edgekv_tokens.js; add real edgekv_tokens.js before deployment");
+}
 
 await createTarGz(
   [
