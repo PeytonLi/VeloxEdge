@@ -1,4 +1,4 @@
-import { LinUCBEngine } from "./index";
+import { LinUCBEngine, type PredictionResult } from "./index";
 import {
   calculateVariance,
   invertMatrix,
@@ -17,6 +17,49 @@ function expectMatrixCloseTo(
 
     for (let column = 0; column < expected[row].length; column++) {
       expect(actual[row][column]).toBeCloseTo(expected[row][column], precision);
+    }
+  }
+}
+
+function expectPredictionCloseTo(
+  actual: PredictionResult,
+  expected: PredictionResult,
+  precision = 12,
+): void {
+  expect(actual.action).toBe(expected.action);
+  expect(actual.ucbBreakdown).toHaveLength(expected.ucbBreakdown.length);
+
+  for (let index = 0; index < expected.ucbBreakdown.length; index++) {
+    expect(actual.ucbBreakdown[index].action).toBe(
+      expected.ucbBreakdown[index].action,
+    );
+    expect(actual.ucbBreakdown[index].expectedReward).toBeCloseTo(
+      expected.ucbBreakdown[index].expectedReward,
+      precision,
+    );
+    expect(actual.ucbBreakdown[index].explorationBonus).toBeCloseTo(
+      expected.ucbBreakdown[index].explorationBonus,
+      precision,
+    );
+    expect(actual.ucbBreakdown[index].ucbValue).toBeCloseTo(
+      expected.ucbBreakdown[index].ucbValue,
+      precision,
+    );
+  }
+}
+
+function expectVectorRecordCloseTo(
+  actual: Record<string, number[]>,
+  expected: Record<string, number[]>,
+  precision = 12,
+): void {
+  expect(Object.keys(actual).sort()).toEqual(Object.keys(expected).sort());
+
+  for (const key of Object.keys(expected)) {
+    expect(actual[key]).toHaveLength(expected[key].length);
+
+    for (let index = 0; index < expected[key].length; index++) {
+      expect(actual[key][index]).toBeCloseTo(expected[key][index], precision);
     }
   }
 }
@@ -290,6 +333,101 @@ describe("LinUCBEngine", () => {
     expect(retuned.predictNextAction(context).action).toBe(
       engine.predictNextAction(context).action,
     );
+  });
+
+  it("round-trips serialized state with identical predictions", () => {
+    const engine = new LinUCBEngine({
+      dimensions: 3,
+      alpha: 0.25,
+      actions: ["TOOL_CONTEXT", "EDGEKV_MEMORY", "VECTOR_WEIGHTS"],
+    });
+    const updates = [
+      { action: "TOOL_CONTEXT", context: [1, 0.2, 0], reward: 0.9 },
+      { action: "EDGEKV_MEMORY", context: [0.1, 1, 0.3], reward: 0.7 },
+      { action: "VECTOR_WEIGHTS", context: [0.2, 0.3, 1], reward: 0.8 },
+      { action: "EDGEKV_MEMORY", context: [0.4, 1, 0.1], reward: 1 },
+    ];
+
+    for (const update of updates) {
+      engine.updateWeights(update.action, update.context, update.reward);
+    }
+
+    const context = [0.2, 0.9, 0.25];
+    const before = engine.predictNextAction(context);
+    const restored = LinUCBEngine.deserialize(engine.serialize());
+    const after = restored.predictNextAction(context);
+
+    expectPredictionCloseTo(after, before);
+    expectVectorRecordCloseTo(
+      restored.snapshot().aInvDiag,
+      engine.snapshot().aInvDiag,
+    );
+    expectVectorRecordCloseTo(
+      restored.snapshot().thetaHat,
+      engine.snapshot().thetaHat,
+    );
+  });
+
+  it("serializes defensive copies and deserializes fresh state", () => {
+    const engine = new LinUCBEngine({
+      dimensions: 2,
+      alpha: 0.5,
+      actions: ["TOOL_CONTEXT", "NO_OP"],
+    });
+
+    const state = engine.serialize();
+    state.actions.push("MUTATED");
+    state.A.TOOL_CONTEXT[0][0] = 99;
+    state.b.TOOL_CONTEXT[0] = 99;
+
+    const fresh = LinUCBEngine.deserialize(engine.serialize());
+
+    expect(fresh.predictNextAction([1, 0]).ucbBreakdown).toHaveLength(2);
+    expect(fresh.snapshot().aInvDiag.TOOL_CONTEXT).toEqual([1, 1]);
+    expect(fresh.snapshot().thetaHat.TOOL_CONTEXT).toEqual([0, 0]);
+  });
+
+  it("rejects serialized state whose dimensions, actions, matrices, or accumulators disagree", () => {
+    const engine = new LinUCBEngine({
+      dimensions: 2,
+      alpha: 0.4,
+      actions: ["TOOL_CONTEXT", "NO_OP"],
+    });
+    const state = engine.serialize();
+
+    expect(() =>
+      LinUCBEngine.deserialize({
+        ...state,
+        dimensions: 3,
+      }),
+    ).toThrow("dimension");
+
+    expect(() =>
+      LinUCBEngine.deserialize({
+        ...state,
+        actions: ["TOOL_CONTEXT", "NO_OP", "EXTRA"],
+      }),
+    ).toThrow("actions");
+
+    expect(() =>
+      LinUCBEngine.deserialize({
+        ...state,
+        A: {
+          ...state.A,
+          TOOL_CONTEXT: [[1, 0]],
+        },
+      }),
+    ).toThrow("matrix");
+
+    expect(() =>
+      LinUCBEngine.deserialize({
+        ...state,
+        b: {
+          ...state.b,
+          NO_OP: [0],
+        },
+      }),
+    ).toThrow("accumulator");
   });
 
   it("keeps learned state stable across many updates and repeated predictions", () => {

@@ -79,8 +79,29 @@ export class LinUCBEngine {
   }
 
   public static deserialize(state: SerializedEngineState): LinUCBEngine {
-    void state;
-    throw new Error("not implemented");
+    LinUCBEngine.assertValidSerializedState(state);
+
+    const engine = new LinUCBEngine({
+      dimensions: state.dimensions,
+      alpha: state.alpha,
+      actions: state.actions,
+    });
+
+    for (const action of state.actions) {
+      engine.A[action] = LinUCBEngine.cloneMatrix(state.A[action]);
+      engine.b[action] = [...state.b[action]];
+      engine.AInv[action] = invertMatrix(engine.A[action]);
+      engine.thetaHat[action] = matrixVectorMultiply(
+        engine.AInv[action],
+        engine.b[action],
+      );
+      engine.visitCounts[action] = LinUCBEngine.estimateVisitCount(
+        engine.A[action],
+        state.dimensions,
+      );
+    }
+
+    return engine;
   }
 
   private createIdentityMatrix(dim: number): number[][] {
@@ -204,7 +225,13 @@ export class LinUCBEngine {
   }
 
   public serialize(): SerializedEngineState {
-    throw new Error("not implemented");
+    return {
+      dimensions: this.dimensions,
+      alpha: this.alpha,
+      actions: [...this.actions],
+      A: this.cloneMatrixRecord(this.A),
+      b: this.cloneVectorRecord(this.b),
+    };
   }
 
   /** Re-create engine with updated alpha (immutable re-init). */
@@ -222,6 +249,141 @@ export class LinUCBEngine {
     engine.visitCounts = { ...this.visitCounts };
     engine.lastUcb = this.lastUcb.map((breakdown) => ({ ...breakdown }));
     return engine;
+  }
+
+  private static assertValidSerializedState(
+    state: SerializedEngineState,
+  ): void {
+    if (state === null || typeof state !== "object") {
+      throw new Error("Serialized engine state must be an object");
+    }
+
+    const config = {
+      dimensions: state.dimensions,
+      alpha: state.alpha,
+      actions: state.actions,
+    };
+    LinUCBEngine.assertValidConfigShape(config);
+
+    if (!LinUCBEngine.isRecord(state.A) || !LinUCBEngine.isRecord(state.b)) {
+      throw new Error("Serialized actions must match A and b records");
+    }
+
+    LinUCBEngine.assertSerializedActionKeys(state);
+
+    for (const action of state.actions) {
+      LinUCBEngine.assertSerializedMatrix(
+        action,
+        state.A[action],
+        state.dimensions,
+      );
+      LinUCBEngine.assertSerializedAccumulator(
+        action,
+        state.b[action],
+        state.dimensions,
+      );
+    }
+  }
+
+  private static assertSerializedActionKeys(
+    state: SerializedEngineState,
+  ): void {
+    const expected = new Set(state.actions);
+    const matrixKeys = Object.keys(state.A);
+    const accumulatorKeys = Object.keys(state.b);
+
+    if (
+      !LinUCBEngine.sameKeySet(expected, matrixKeys) ||
+      !LinUCBEngine.sameKeySet(expected, accumulatorKeys)
+    ) {
+      throw new Error("Serialized actions must match A and b keys");
+    }
+  }
+
+  private static assertSerializedMatrix(
+    action: string,
+    matrix: unknown,
+    dimensions: number,
+  ): asserts matrix is number[][] {
+    if (
+      !Array.isArray(matrix) ||
+      matrix.length !== dimensions ||
+      matrix.some(
+        (row) =>
+          !Array.isArray(row) ||
+          row.length !== dimensions ||
+          row.some((value) => !Number.isFinite(value)),
+      )
+    ) {
+      throw new Error(
+        `Serialized matrix for action ${action} must match dimension ${dimensions}`,
+      );
+    }
+  }
+
+  private static assertSerializedAccumulator(
+    action: string,
+    accumulator: unknown,
+    dimensions: number,
+  ): asserts accumulator is number[] {
+    if (
+      !Array.isArray(accumulator) ||
+      accumulator.length !== dimensions ||
+      accumulator.some((value) => !Number.isFinite(value))
+    ) {
+      throw new Error(
+        `Serialized accumulator for action ${action} must match dimension ${dimensions}`,
+      );
+    }
+  }
+
+  private static sameKeySet(expected: Set<string>, keys: string[]): boolean {
+    return (
+      keys.length === expected.size && keys.every((key) => expected.has(key))
+    );
+  }
+
+  private static isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  private static cloneMatrix(matrix: number[][]): number[][] {
+    return matrix.map((row) => [...row]);
+  }
+
+  private static estimateVisitCount(
+    matrix: number[][],
+    dimensions: number,
+  ): number {
+    const informationMass = matrix.reduce(
+      (sum, row, index) => sum + row[index],
+      0,
+    );
+    return Math.max(0, informationMass - dimensions);
+  }
+
+  private cloneMatrixRecord(
+    record: Record<string, number[][]>,
+  ): Record<string, number[][]> {
+    const copy: Record<string, number[][]> = {};
+
+    for (const action of this.actions) {
+      copy[action] = LinUCBEngine.cloneMatrix(record[action]);
+    }
+
+    return copy;
+  }
+
+  private cloneVectorRecord(
+    record: Record<string, number[]>,
+  ): Record<string, number[]> {
+    const copy: Record<string, number[]> = {};
+
+    for (const action of this.actions) {
+      copy[action] = [...record[action]];
+    }
+
+    return copy;
   }
 
   private updateInverseForRankOne(
@@ -282,6 +444,10 @@ export class LinUCBEngine {
   }
 
   private assertValidConfig(config: BanditConfig): void {
+    LinUCBEngine.assertValidConfigShape(config);
+  }
+
+  private static assertValidConfigShape(config: BanditConfig): void {
     if (!Number.isInteger(config.dimensions) || config.dimensions <= 0) {
       throw new Error("Bandit dimensions must be a positive integer");
     }
@@ -290,11 +456,15 @@ export class LinUCBEngine {
       throw new Error("Bandit alpha must be a finite non-negative number");
     }
 
-    if (config.actions.length === 0) {
+    if (!Array.isArray(config.actions) || config.actions.length === 0) {
       throw new Error("Bandit config must include at least one action");
     }
 
-    if (config.actions.some((action) => action.trim().length === 0)) {
+    if (
+      config.actions.some(
+        (action) => typeof action !== "string" || action.trim().length === 0,
+      )
+    ) {
       throw new Error("Bandit actions must be non-empty strings");
     }
 
