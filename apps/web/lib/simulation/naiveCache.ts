@@ -16,12 +16,12 @@ export class NaiveStringCache {
    * Returns null on any mismatch (representing a cold fetch).
    */
   public get(key: string): string | null {
-    throw new Error('Not implemented — Agent B');
+    return this.store.get(key) ?? null;
   }
 
   /** Store a key→action mapping. */
   public set(key: string, action: string): void {
-    throw new Error('Not implemented — Agent B');
+    this.store.set(key, action);
   }
 
   public get size(): number {

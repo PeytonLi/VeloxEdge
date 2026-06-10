@@ -20,6 +20,19 @@ export interface LatencyResult {
   reward: number;
 }
 
+function finitePositive(value: number, fallback: number): number {
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function clamp01(value: number): number {
+  if (Number.isNaN(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function roundMs(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
 /**
  * Compute latency result for one bandit step.
  *
@@ -32,7 +45,18 @@ export function computeLatency(
   bestAction: string,
   coldFetchMs: number,
 ): LatencyResult {
-  throw new Error('Not implemented — Agent B');
+  const coldMs = Math.max(EDGE_HIT_MS, finitePositive(coldFetchMs, COLD_FETCH_MS));
+  const cacheHit = predictedAction === bestAction;
+  const latencyMs = cacheHit ? EDGE_HIT_MS : coldMs;
+  const savedMs = cacheHit ? Math.max(0, coldMs - EDGE_HIT_MS) : 0;
+  const maxSavings = Math.max(1, coldMs - EDGE_HIT_MS);
+
+  return {
+    cacheHit,
+    latencyMs: roundMs(latencyMs),
+    savedMs: roundMs(savedMs),
+    reward: clamp01(savedMs / maxSavings),
+  };
 }
 
 /** Running statistics accumulator for Section A counters. */
@@ -57,7 +81,16 @@ export function emptyStats(): LatencyStats {
 }
 
 export function accumulateStats(stats: LatencyStats, result: LatencyResult): LatencyStats {
-  throw new Error('Not implemented — Agent B');
+  const naiveStepMs = result.latencyMs + result.savedMs;
+
+  return {
+    totalSteps: stats.totalSteps + 1,
+    cacheHits: stats.cacheHits + (result.cacheHit ? 1 : 0),
+    coldFetches: stats.coldFetches + (result.cacheHit ? 0 : 1),
+    totalSavedMs: roundMs(stats.totalSavedMs + result.savedMs),
+    naiveTotalMs: roundMs(stats.naiveTotalMs + naiveStepMs),
+    veloxTotalMs: roundMs(stats.veloxTotalMs + result.latencyMs),
+  };
 }
 
 /** Percentage latency improvement of VeloxEdge vs naive cache (0–100). */
