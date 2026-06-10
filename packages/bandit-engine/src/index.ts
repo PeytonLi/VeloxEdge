@@ -18,6 +18,8 @@ import type {
 
 export type { BanditConfig, EngineSnapshot, PredictionResult, UcbBreakdown };
 
+const UCB_TIE_EPSILON = 1e-12;
+
 /**
  * Contextual Linear Upper Confidence Bound bandit (LinUCB).
  *
@@ -35,23 +37,33 @@ export class LinUCBEngine {
   private A: Record<string, number[][]>;
   /** Per-arm d×1 accumulator vector b_a */
   private b: Record<string, number[]>;
-  /** Cached inverse of A_a (recomputed on each predict) */
+  /** Cached inverse of A_a */
   private AInv: Record<string, number[][]>;
+  /** Cached closed-form weight estimates θ̂_a = A_a⁻¹b_a */
+  private thetaHat: Record<string, number[]>;
+  /** Number of observed updates per arm, used for deterministic tie-breaking */
+  private visitCounts: Record<string, number>;
   /** Last UCB breakdown for snapshot() */
   private lastUcb: UcbBreakdown[] = [];
 
   constructor(config: BanditConfig) {
+    this.assertValidConfig(config);
+
     this.dimensions = config.dimensions;
     this.alpha = config.alpha;
-    this.actions = config.actions;
+    this.actions = [...config.actions];
     this.A = {};
     this.b = {};
     this.AInv = {};
+    this.thetaHat = {};
+    this.visitCounts = {};
 
     for (const action of this.actions) {
       this.A[action] = this.createIdentityMatrix(this.dimensions);
       this.b[action] = new Array(this.dimensions).fill(0);
       this.AInv[action] = this.createIdentityMatrix(this.dimensions); // A⁻¹ = I initially
+      this.thetaHat[action] = new Array(this.dimensions).fill(0);
+      this.visitCounts[action] = 0;
     }
   }
 
@@ -77,9 +89,7 @@ export class LinUCBEngine {
     const ucbBreakdown: UcbBreakdown[] = [];
 
     for (const action of this.actions) {
-      this.AInv[action] = invertMatrix(this.A[action]);
-      const thetaHat = matrixVectorMultiply(this.AInv[action], this.b[action]);
-      const expectedReward = dotProduct(contextVector, thetaHat);
+      const expectedReward = dotProduct(contextVector, this.thetaHat[action]);
       const variance = calculateVariance(contextVector, this.AInv[action]);
       const explorationBonus = this.alpha * Math.sqrt(variance);
       const ucbValue = expectedReward + explorationBonus;
@@ -91,7 +101,9 @@ export class LinUCBEngine {
         ucbValue,
       });
 
-      if (ucbValue > winningUcbValue) {
+      if (
+        this.isBetterCandidate(action, ucbValue, winningAction, winningUcbValue)
+      ) {
         winningAction = action;
         winningUcbValue = ucbValue;
       }
@@ -138,7 +150,12 @@ export class LinUCBEngine {
       }
     }
 
-    this.AInv[action] = invertMatrix(covariance);
+    this.AInv[action] = this.updateInverseForRankOne(action, contextVector);
+    this.thetaHat[action] = matrixVectorMultiply(
+      this.AInv[action],
+      accumulator,
+    );
+    this.visitCounts[action] += 1;
   }
 
   /**
@@ -151,7 +168,7 @@ export class LinUCBEngine {
     for (const action of this.actions) {
       const inverse = this.AInv[action];
       aInvDiag[action] = inverse.map((row, index) => row[index]);
-      thetaHat[action] = matrixVectorMultiply(inverse, this.b[action]);
+      thetaHat[action] = [...this.thetaHat[action]];
     }
 
     return {
@@ -181,8 +198,89 @@ export class LinUCBEngine {
     engine.A = JSON.parse(JSON.stringify(this.A));
     engine.b = JSON.parse(JSON.stringify(this.b));
     engine.AInv = JSON.parse(JSON.stringify(this.AInv));
+    engine.thetaHat = JSON.parse(JSON.stringify(this.thetaHat));
+    engine.visitCounts = { ...this.visitCounts };
     engine.lastUcb = this.lastUcb.map((breakdown) => ({ ...breakdown }));
     return engine;
+  }
+
+  private updateInverseForRankOne(
+    action: string,
+    contextVector: number[],
+  ): number[][] {
+    const inverse = this.AInv[action];
+    const inverseTimesContext = matrixVectorMultiply(inverse, contextVector);
+    const contextTimesInverse = this.vectorMatrixMultiply(
+      contextVector,
+      inverse,
+    );
+    const denominator = 1 + dotProduct(contextVector, inverseTimesContext);
+
+    if (!Number.isFinite(denominator) || Math.abs(denominator) < 1e-12) {
+      return invertMatrix(this.A[action]);
+    }
+
+    const updatedInverse = inverse.map((row, rowIndex) =>
+      row.map(
+        (value, columnIndex) =>
+          value -
+          (inverseTimesContext[rowIndex] * contextTimesInverse[columnIndex]) /
+            denominator,
+      ),
+    );
+
+    if (!updatedInverse.every((row) => row.every(Number.isFinite))) {
+      return invertMatrix(this.A[action]);
+    }
+
+    return updatedInverse;
+  }
+
+  private vectorMatrixMultiply(vector: number[], matrix: number[][]): number[] {
+    return Array.from({ length: this.dimensions }, (_, columnIndex) =>
+      vector.reduce(
+        (sum, value, rowIndex) => sum + value * matrix[rowIndex][columnIndex],
+        0,
+      ),
+    );
+  }
+
+  private isBetterCandidate(
+    action: string,
+    ucbValue: number,
+    winningAction: string,
+    winningUcbValue: number,
+  ): boolean {
+    if (ucbValue > winningUcbValue + UCB_TIE_EPSILON) {
+      return true;
+    }
+
+    return (
+      Math.abs(ucbValue - winningUcbValue) <= UCB_TIE_EPSILON &&
+      this.visitCounts[action] < this.visitCounts[winningAction]
+    );
+  }
+
+  private assertValidConfig(config: BanditConfig): void {
+    if (!Number.isInteger(config.dimensions) || config.dimensions <= 0) {
+      throw new Error("Bandit dimensions must be a positive integer");
+    }
+
+    if (!Number.isFinite(config.alpha) || config.alpha < 0) {
+      throw new Error("Bandit alpha must be a finite non-negative number");
+    }
+
+    if (config.actions.length === 0) {
+      throw new Error("Bandit config must include at least one action");
+    }
+
+    if (config.actions.some((action) => action.trim().length === 0)) {
+      throw new Error("Bandit actions must be non-empty strings");
+    }
+
+    if (new Set(config.actions).size !== config.actions.length) {
+      throw new Error("Bandit actions must be unique");
+    }
   }
 
   private assertKnownAction(action: string): void {

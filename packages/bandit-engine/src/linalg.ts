@@ -7,6 +7,9 @@
  * Guards against near-singular matrices by returning the identity on failure.
  * @param matrix - d×d input matrix (not mutated)
  */
+const SINGULARITY_EPSILON = 1e-10;
+const DIAGONAL_JITTERS = [0, 1e-8, 1e-6, 1e-4];
+
 export function invertMatrix(matrix: number[][]): number[][] {
   const dimension = matrix.length;
 
@@ -18,56 +21,14 @@ export function invertMatrix(matrix: number[][]): number[][] {
     return createIdentityMatrix(dimension);
   }
 
-  const augmented = matrix.map((row, rowIndex) => [
-    ...row,
-    ...createIdentityRow(dimension, rowIndex),
-  ]);
-
-  for (let column = 0; column < dimension; column++) {
-    const pivotRow = findPivotRow(augmented, column, dimension);
-    const pivot = augmented[pivotRow][column];
-
-    if (!Number.isFinite(pivot) || Math.abs(pivot) < 1e-10) {
-      return createIdentityMatrix(dimension);
-    }
-
-    if (pivotRow !== column) {
-      [augmented[column], augmented[pivotRow]] = [
-        augmented[pivotRow],
-        augmented[column],
-      ];
-    }
-
-    const normalizedPivot = augmented[column][column];
-    for (let j = 0; j < dimension * 2; j++) {
-      augmented[column][j] /= normalizedPivot;
-    }
-
-    for (let row = 0; row < dimension; row++) {
-      if (row === column) {
-        continue;
-      }
-
-      const factor = augmented[row][column];
-      if (factor === 0) {
-        continue;
-      }
-
-      for (let j = 0; j < dimension * 2; j++) {
-        augmented[row][j] -= factor * augmented[column][j];
-      }
+  for (const jitter of DIAGONAL_JITTERS) {
+    const inverse = tryInvertMatrix(withDiagonalJitter(matrix, jitter));
+    if (inverse !== null) {
+      return inverse;
     }
   }
 
-  const inverse = augmented.map((row) =>
-    row.slice(dimension).map(cleanNearZero),
-  );
-
-  if (!inverse.every((row) => row.every(Number.isFinite))) {
-    return createIdentityMatrix(dimension);
-  }
-
-  return inverse;
+  return createIdentityMatrix(dimension);
 }
 
 /**
@@ -112,6 +73,68 @@ export function calculateVariance(
 ): number {
   const projected = matrixVectorMultiply(matrixInv, vec);
   return Math.max(0, dotProduct(vec, projected));
+}
+
+function tryInvertMatrix(matrix: number[][]): number[][] | null {
+  const dimension = matrix.length;
+  const augmented = matrix.map((row, rowIndex) => [
+    ...row,
+    ...createIdentityRow(dimension, rowIndex),
+  ]);
+
+  for (let column = 0; column < dimension; column++) {
+    const pivotRow = findPivotRow(augmented, column, dimension);
+    const pivot = augmented[pivotRow][column];
+
+    if (!Number.isFinite(pivot) || Math.abs(pivot) < SINGULARITY_EPSILON) {
+      return null;
+    }
+
+    if (pivotRow !== column) {
+      [augmented[column], augmented[pivotRow]] = [
+        augmented[pivotRow],
+        augmented[column],
+      ];
+    }
+
+    const normalizedPivot = augmented[column][column];
+    for (let j = 0; j < dimension * 2; j++) {
+      augmented[column][j] /= normalizedPivot;
+    }
+
+    for (let row = 0; row < dimension; row++) {
+      if (row === column) {
+        continue;
+      }
+
+      const factor = augmented[row][column];
+      if (factor === 0) {
+        continue;
+      }
+
+      for (let j = 0; j < dimension * 2; j++) {
+        augmented[row][j] -= factor * augmented[column][j];
+      }
+    }
+  }
+
+  const inverse = augmented.map((row) =>
+    row.slice(dimension).map(cleanNearZero),
+  );
+
+  if (!inverse.every((row) => row.every(Number.isFinite))) {
+    return null;
+  }
+
+  return inverse;
+}
+
+function withDiagonalJitter(matrix: number[][], jitter: number): number[][] {
+  return matrix.map((row, rowIndex) =>
+    row.map((value, columnIndex) =>
+      rowIndex === columnIndex ? value + jitter : value,
+    ),
+  );
 }
 
 function isSquareMatrix(matrix: number[][]): boolean {
