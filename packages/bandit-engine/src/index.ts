@@ -3,8 +3,18 @@
 // method bodies. Do not add/remove public methods or change types.
 // ═══════════════════════════════════════════════════════════════
 
-import { invertMatrix } from './linalg';
-import type { BanditConfig, EngineSnapshot, PredictionResult, UcbBreakdown } from './types';
+import {
+  calculateVariance,
+  dotProduct,
+  invertMatrix,
+  matrixVectorMultiply,
+} from "./linalg";
+import type {
+  BanditConfig,
+  EngineSnapshot,
+  PredictionResult,
+  UcbBreakdown,
+} from "./types";
 
 export type { BanditConfig, EngineSnapshot, PredictionResult, UcbBreakdown };
 
@@ -60,7 +70,39 @@ export class LinUCBEngine {
    * Returns the winning action name plus the full UCB breakdown for visualization.
    */
   public predictNextAction(contextVector: number[]): PredictionResult {
-    throw new Error('Not implemented — Agent A');
+    this.assertValidContextVector(contextVector);
+
+    let winningAction = this.actions[0];
+    let winningUcbValue = Number.NEGATIVE_INFINITY;
+    const ucbBreakdown: UcbBreakdown[] = [];
+
+    for (const action of this.actions) {
+      this.AInv[action] = invertMatrix(this.A[action]);
+      const thetaHat = matrixVectorMultiply(this.AInv[action], this.b[action]);
+      const expectedReward = dotProduct(contextVector, thetaHat);
+      const variance = calculateVariance(contextVector, this.AInv[action]);
+      const explorationBonus = this.alpha * Math.sqrt(variance);
+      const ucbValue = expectedReward + explorationBonus;
+
+      ucbBreakdown.push({
+        action,
+        expectedReward,
+        explorationBonus,
+        ucbValue,
+      });
+
+      if (ucbValue > winningUcbValue) {
+        winningAction = action;
+        winningUcbValue = ucbValue;
+      }
+    }
+
+    this.lastUcb = ucbBreakdown.map((breakdown) => ({ ...breakdown }));
+
+    return {
+      action: winningAction,
+      ucbBreakdown: ucbBreakdown.map((breakdown) => ({ ...breakdown })),
+    };
   }
 
   /**
@@ -73,15 +115,50 @@ export class LinUCBEngine {
    * @param contextVector - context vector x at the time of selection
    * @param reward        - normalized latency-reduction reward ∈ [0, 1]
    */
-  public updateWeights(action: string, contextVector: number[], reward: number): void {
-    throw new Error('Not implemented — Agent A');
+  public updateWeights(
+    action: string,
+    contextVector: number[],
+    reward: number,
+  ): void {
+    this.assertKnownAction(action);
+    this.assertValidContextVector(contextVector);
+
+    if (!Number.isFinite(reward) || reward < 0 || reward > 1) {
+      throw new Error("Reward must be a finite value in [0, 1]");
+    }
+
+    const covariance = this.A[action];
+    const accumulator = this.b[action];
+
+    for (let row = 0; row < this.dimensions; row++) {
+      accumulator[row] += reward * contextVector[row];
+
+      for (let column = 0; column < this.dimensions; column++) {
+        covariance[row][column] += contextVector[row] * contextVector[column];
+      }
+    }
+
+    this.AInv[action] = invertMatrix(covariance);
   }
 
   /**
    * Return current engine state for dashboard visualization (heatmap, convergence chart).
    */
   public snapshot(): EngineSnapshot {
-    throw new Error('Not implemented — Agent A');
+    const aInvDiag: Record<string, number[]> = {};
+    const thetaHat: Record<string, number[]> = {};
+
+    for (const action of this.actions) {
+      const inverse = this.AInv[action];
+      aInvDiag[action] = inverse.map((row, index) => row[index]);
+      thetaHat[action] = matrixVectorMultiply(inverse, this.b[action]);
+    }
+
+    return {
+      aInvDiag,
+      thetaHat,
+      lastUcb: this.lastUcb.map((breakdown) => ({ ...breakdown })),
+    };
   }
 
   // Expose alpha so the dashboard What-If board can re-parameterise
@@ -104,7 +181,26 @@ export class LinUCBEngine {
     engine.A = JSON.parse(JSON.stringify(this.A));
     engine.b = JSON.parse(JSON.stringify(this.b));
     engine.AInv = JSON.parse(JSON.stringify(this.AInv));
+    engine.lastUcb = this.lastUcb.map((breakdown) => ({ ...breakdown }));
     return engine;
+  }
+
+  private assertKnownAction(action: string): void {
+    if (!this.actions.includes(action)) {
+      throw new Error(`Unknown action: ${action}`);
+    }
+  }
+
+  private assertValidContextVector(contextVector: number[]): void {
+    if (contextVector.length !== this.dimensions) {
+      throw new Error(
+        `Expected context vector with ${this.dimensions} dimensions`,
+      );
+    }
+
+    if (!contextVector.every(Number.isFinite)) {
+      throw new Error("Context vector must contain only finite numbers");
+    }
   }
 
   // Keep invertMatrix accessible for subclass tests
