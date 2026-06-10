@@ -1,8 +1,54 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import type { EdgeUpdateRequest } from "@veloxedge/bandit-engine";
+import { edgeKvEmulator } from "@/lib/edge/edgeKvEmulator";
 
-export async function POST() {
-  return NextResponse.json(
-    { error: "VeloxEdge edge update route is not implemented yet" },
-    { status: 501 },
-  );
+export const runtime = "nodejs";
+
+function edgeworkerEndpoint(pathname: string): string | null {
+  const baseUrl = process.env.VELOX_EDGEWORKER_URL?.trim();
+  if (!baseUrl) return null;
+  return baseUrl.endsWith("/")
+    ? baseUrl.slice(0, -1) + pathname
+    : baseUrl + pathname;
+}
+
+async function proxyToEdgeworker(
+  endpoint: string,
+  payload: EdgeUpdateRequest,
+): Promise<NextResponse> {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    body = { error: "EdgeWorker returned a non-JSON response" };
+  }
+
+  return NextResponse.json(body, { status: response.status });
+}
+
+export async function POST(request: NextRequest) {
+  let payload: EdgeUpdateRequest;
+
+  try {
+    payload = (await request.json()) as EdgeUpdateRequest;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const endpoint = edgeworkerEndpoint("/update");
+  if (endpoint) return proxyToEdgeworker(endpoint, payload);
+
+  try {
+    const response = await edgeKvEmulator.update(payload);
+    return NextResponse.json(response);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown emulator failure";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
