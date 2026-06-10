@@ -4,7 +4,12 @@ import { useMemo, useReducer, useState } from "react";
 import type { EngineSnapshot } from "@veloxedge/bandit-engine";
 import { useVeloxEngine } from "@/hooks/useVeloxEngine";
 import type { InterceptorEvent } from "@/hooks/useVeloxEngine";
-import { journeys as scriptedJourneys } from "@/lib/simulation";
+import {
+  accumulateStats,
+  computeLatency,
+  emptyStats,
+  journeys as scriptedJourneys,
+} from "@/lib/simulation";
 import type { Journey, JourneyStep, LatencyStats } from "@/lib/simulation";
 import Console from "@/components/Console";
 import InterceptorOverlay from "@/components/InterceptorOverlay";
@@ -17,12 +22,10 @@ import {
   ACTIONS,
   DEFAULT_ALPHA,
   DEMO_JOURNEYS,
-  FALLBACK_EDGE_HIT_MS,
   buildFallbackEvents,
   calculateImprovement,
   classifyPromptAction,
   createDemoSnapshot,
-  createEmptyStats,
   initialConvergence,
   initialTimeline,
   snapshotToConvergencePoint,
@@ -56,7 +59,7 @@ function createInitialDemoState(alpha: number): DemoState {
   const snapshot = createDemoSnapshot(alpha, 0, "TOOL_CONTEXT");
   return {
     tick: 0,
-    stats: createEmptyStats(),
+    stats: emptyStats(),
     events: buildFallbackEvents(
       0,
       "TOOL_CONTEXT",
@@ -117,19 +120,8 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
     620,
     journeyStep.coldFetchMs + (prompt.length % 5) * 18,
   );
-  const naiveLatency = coldFetchMs + 42 + (nextTick % 3) * 24;
-  const veloxLatency = cacheHit
-    ? FALLBACK_EDGE_HIT_MS + (nextTick % 2) * 3
-    : coldFetchMs + 78;
-  const savedMs = Math.max(0, naiveLatency - veloxLatency);
-  const stats: LatencyStats = {
-    totalSteps: state.stats.totalSteps + 1,
-    cacheHits: state.stats.cacheHits + (cacheHit ? 1 : 0),
-    coldFetches: state.stats.coldFetches + (cacheHit ? 0 : 1),
-    totalSavedMs: state.stats.totalSavedMs + savedMs,
-    naiveTotalMs: state.stats.naiveTotalMs + naiveLatency,
-    veloxTotalMs: state.stats.veloxTotalMs + veloxLatency,
-  };
+  const latency = computeLatency(predictedAction, bestAction, coldFetchMs);
+  const stats = accumulateStats(state.stats, latency);
   const snapshot = createDemoSnapshot(action.alpha, nextTick, predictedAction);
   const label =
     prompt.length > 0 ? `Free-text prompt: ${prompt}` : journeyStep.label;
@@ -138,7 +130,7 @@ function demoReducer(state: DemoState, action: DemoAction): DemoState {
     tick: nextTick,
     stats,
     events: [
-      ...buildFallbackEvents(nextTick, predictedAction, label, cacheHit),
+      ...buildFallbackEvents(nextTick, predictedAction, label, latency.cacheHit),
       ...state.events,
     ].slice(0, 18),
     snapshot,
@@ -388,6 +380,12 @@ export default function Dashboard() {
             activeAction={activeAction}
             dimensions={12}
             ready={engine.ready}
+            mode={engine.mode}
+            onModeChange={engine.setMode}
+            edgeRttMs={engine.edgeRttMs}
+            edgeComputeMicros={engine.edgeComputeMicros}
+            edgeStatus={engine.edgeStatus}
+            edgeError={engine.edgeError}
           />
         </section>
       </div>
