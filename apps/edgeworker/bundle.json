@@ -1,0 +1,7 @@
+{
+  "edgeworker-version": "0.1.0",
+  "description": "VeloxEdge LinUCB predictor EdgeWorker",
+  "misc": {
+    "created-by": "veloxedge-agent-0"
+  }
+}

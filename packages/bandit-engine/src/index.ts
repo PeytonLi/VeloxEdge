@@ -15,8 +15,19 @@ import type {
   PredictionResult,
   UcbBreakdown,
 } from "./types";
+import type { SerializedEngineState } from "./edge";
 
 export type { BanditConfig, EngineSnapshot, PredictionResult, UcbBreakdown };
+export type {
+  EdgeEngineConfig,
+  EdgePredictRequest,
+  EdgePredictResponse,
+  EdgeResponseBase,
+  EdgeSessionRequest,
+  EdgeUpdateRequest,
+  EdgeUpdateResponse,
+  SerializedEngineState,
+} from "./edge";
 
 const UCB_TIE_EPSILON = 1e-12;
 
@@ -65,6 +76,11 @@ export class LinUCBEngine {
       this.thetaHat[action] = new Array(this.dimensions).fill(0);
       this.visitCounts[action] = 0;
     }
+  }
+
+  public static deserialize(state: SerializedEngineState): LinUCBEngine {
+    void state;
+    throw new Error("not implemented");
   }
 
   private createIdentityMatrix(dim: number): number[][] {
@@ -185,6 +201,10 @@ export class LinUCBEngine {
 
   public getActions(): string[] {
     return [...this.actions];
+  }
+
+  public serialize(): SerializedEngineState {
+    throw new Error("not implemented");
   }
 
   /** Re-create engine with updated alpha (immutable re-init). */
