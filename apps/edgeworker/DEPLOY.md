@@ -1,30 +1,53 @@
 # VeloxEdge EdgeWorker deploy runbook
 
-This directory builds a deployable Akamai EdgeWorkers bundle for the
-VeloxEdge LinUCB predictor. The worker exposes:
+This directory builds a deployable Akamai EdgeWorkers bundle for the live
+VeloxEdge value loop. The worker exposes:
 
 - `GET /health` — health check
-- `POST /predict` — predict and persist the session engine state
-- `POST /update` — apply reward, predict again, and persist state
+- `POST /predict` — read-only LinUCB prediction, origin prefetch, EdgeKV asset write, pending attribution write
+- `POST /resolve` — real cache hit/miss measurement, latency-derived reward, and the only live bandit-state update
+- `POST /update` — legacy/manual reward path retained for compatibility
 - `POST /reset` — reset by writing fresh state; no EdgeKV delete is used
 
-The worker stores per-session serialized engine state at:
+`/predict` does not mutate `A`/`b`. It only reads session state, prefetches the
+predicted asset, and records a pending prediction. `/resolve` is the live writer:
+it reads the requested asset from EdgeKV, falls back to origin on miss, computes
+reward from measured latency, and persists the updated engine state.
+
+## EdgeKV layout and TTLs
 
 ```text
 namespace: veloxedge
-group:     sessions
-item:      veloxedge_<sessionId>
+
+group: sessions
+item:  veloxedge_<sessionId>
+ttl:   3600s
+
+group: assets
+item:  asset_<derived asset key, sanitized>
+ttl:   60s
+
+group: pending
+item:  pending_<sessionId>_<step>
+ttl:   300s
 ```
 
-The request body should stay small. VeloxEdge sends a 12-dimensional context
-vector and compact serialized matrices, well below typical EdgeWorkers body and
-EdgeKV item limits. The vendored EdgeKV helper also contains the documented
-large-response handling path for responses above 128 KB.
+Namespace/group retention should be at least as long as the item TTLs above.
+The worker still writes explicit item TTLs on EdgeKV PUTs so stale assets and
+attribution records age out quickly.
 
 ## Security rules
 
 Do not commit Akamai credentials. The real `edgekv_tokens.js` is gitignored.
 Only `edgekv_tokens.example.js` is committed.
+
+Set a shared secret for dashboard/API-route-to-worker calls. When
+`VELOX_EDGE_SECRET` is configured in the worker environment, every POST request
+must include:
+
+```text
+x-velox-edge-secret: <same secret>
+```
 
 Do not activate this worker from an automated agent. Activation is a human
 operator step after reviewing the bundle and property association.
@@ -35,6 +58,7 @@ operator step after reviewing the bundle and property association.
 - EdgeWorkers CLI package installed
 - EdgeKV CLI package installed
 - A Property Manager property where the EdgeWorker behavior can be associated
+- A reachable origin endpoint that serves VeloxEdge assets at `/<encoded asset key>`
 - Node.js and pnpm for local bundle generation
 
 Install CLI packages if needed:
@@ -44,7 +68,7 @@ akamai install edgeworkers
 akamai install edgekv
 ```
 
-## 1. Create EdgeKV namespace, group, and token
+## 1. Create EdgeKV namespace, groups, and token
 
 Initialize EdgeKV for the account or contract/group if it has not been enabled:
 
@@ -52,15 +76,16 @@ Initialize EdgeKV for the account or contract/group if it has not been enabled:
 akamai edgekv initialize
 ```
 
-Create the namespace and group used by the worker:
+Create the namespace and groups used by the worker:
 
 ```sh
 akamai edgekv create namespace veloxedge
 akamai edgekv create group veloxedge sessions
+akamai edgekv create group veloxedge assets
+akamai edgekv create group veloxedge pending
 ```
 
-Create an access token for the namespace. Follow the CLI prompts and select
-read/write access for namespace `veloxedge`:
+Create an access token for namespace `veloxedge` with read/write access:
 
 ```sh
 akamai edgekv create token
@@ -81,7 +106,20 @@ export const edgekv_access_tokens = {
 export default edgekv_access_tokens;
 ```
 
-## 2. Build the EdgeWorker bundle
+## 2. Configure origin and worker environment
+
+The worker prefetches assets with `httpRequest` from:
+
+```text
+VELOX_ORIGIN_URL=https://<your-origin-hostname>/api/origin
+VELOX_EDGE_SECRET=<shared random secret>
+```
+
+The origin must return a 2xx response for `GET /<encoded asset key>`. JSON
+responses may include `coldOriginMs`; otherwise the worker uses the measured
+subrequest duration (with a 100 ms default floor for reward normalization).
+
+## 3. Build the EdgeWorker bundle
 
 From the repository root:
 
@@ -120,7 +158,7 @@ edgekv.js
 edgekv_tokens.js
 ```
 
-## 3. Register, upload, and validate the EdgeWorker
+## 4. Register, upload, and validate the EdgeWorker
 
 Register a new EdgeWorker ID in Akamai Control Center or with the CLI:
 
@@ -140,7 +178,7 @@ Validate the uploaded bundle if your CLI version supports validation:
 akamai edgeworkers validate <edgeworker-id> apps/edgeworker/dist/bundle.tgz
 ```
 
-## 4. Associate with a Property Manager property
+## 5. Associate with a Property Manager property
 
 In Property Manager, add or update an EdgeWorkers behavior on the route/path you
 want to expose, for example `/veloxedge/*`, and select the uploaded EdgeWorker
@@ -148,7 +186,7 @@ ID/version. Save a new property version and activate it to staging first.
 
 Do not activate to production until staging smoke tests pass.
 
-## 5. Activate after human approval
+## 6. Activate after human approval
 
 Staging activation example:
 
@@ -162,34 +200,52 @@ Production activation example, only after review:
 akamai edgeworkers activate <edgeworker-id> <version> production
 ```
 
-## 6. Connect the web dashboard
+## 7. Connect the web dashboard
 
 Set the web app proxy target in `.env` or your hosting provider environment:
 
 ```sh
 VELOX_EDGEWORKER_URL=https://<your-property-hostname>/veloxedge
+VELOX_EDGE_SECRET=<shared random secret>
 ```
 
-The dashboard's API routes proxy `/api/edge/predict` and `/api/edge/update` to
+The dashboard's API routes proxy `/api/edge/predict` and `/api/edge/resolve` to
 that origin when `VELOX_EDGEWORKER_URL` is present. Without it, the local web
 emulator is used.
 
 ## Smoke test payloads
 
-Predict:
+Use the same `sessionId`, `step`, context vector, and derived key between
+`/predict` and `/resolve` so the worker can attribute the measured cache result
+to the prediction.
+
+Predict and prefetch:
 
 ```sh
 curl -X POST https://<your-property-hostname>/veloxedge/predict \
   -H 'content-type: application/json' \
-  -d '{"sessionId":"demo","dimensions":12,"alpha":1,"actions":["TOOL_CONTEXT","EDGEKV_MEMORY","VECTOR_WEIGHTS","NO_OP"],"contextVector":[1,0,0,0,0,0,0,0,0,0,0,0]}'
+  -H 'x-velox-edge-secret: <shared random secret>' \
+  -d '{"sessionId":"demo","step":1,"dimensions":12,"alpha":1,"actions":["TOOL_CONTEXT","EDGEKV_MEMORY","VECTOR_WEIGHTS","NO_OP"],"contextVector":[1,0,0,0,0,0,0,0,0,0,0,0]}'
 ```
 
-Update:
+Resolve the returned `predictedKey`:
 
 ```sh
-curl -X POST https://<your-property-hostname>/veloxedge/update \
+curl -X POST https://<your-property-hostname>/veloxedge/resolve \
   -H 'content-type: application/json' \
-  -d '{"sessionId":"demo","dimensions":12,"alpha":1,"actions":["TOOL_CONTEXT","EDGEKV_MEMORY","VECTOR_WEIGHTS","NO_OP"],"action":"TOOL_CONTEXT","contextVector":[1,0,0,0,0,0,0,0,0,0,0,0],"reward":1}'
+  -H 'x-velox-edge-secret: <shared random secret>' \
+  -d '{"sessionId":"demo","step":1,"requestedKey":"<predictedKey>","config":{"dimensions":12,"alpha":1,"actions":["TOOL_CONTEXT","EDGEKV_MEMORY","VECTOR_WEIGHTS","NO_OP"]},"contextVector":[1,0,0,0,0,0,0,0,0,0,0,0]}'
 ```
 
-Both responses include `action`, `ucbBreakdown`, and measured `computeMicros`.
+A successful prefetched resolve should return `cacheHit: true`, measured
+`latencyMs`, reward from `rewardFromLatency`, and `computeMicros`. If the asset
+was not present, `/resolve` fetches origin, writes the asset with TTL, and
+returns `cacheHit: false` with a low reward.
+
+## Concurrency note
+
+EdgeKV does not provide a compare-and-swap primitive through this helper. The
+worker uses best-effort read/modify/write and accepts last-write-wins for
+concurrent resolves in the same session. Pending records are keyed by
+`sessionId + step`, so clients should send monotonic steps to minimize lost
+attribution.
