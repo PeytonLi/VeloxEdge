@@ -144,7 +144,7 @@ export class EdgeKV {
 
 	addSandboxId(uri) {
 		if (this.#sandbox_id) {
-			uri = uri + "?sandboxId=" + this.#sandbox_id;
+			uri = uri + (uri.includes("?") ? "&" : "?") + "sandboxId=" + this.#sandbox_id;
 			if (this.#sandbox_fallback) {
 				uri = uri + "&sandboxFallback=true";
 			}
@@ -169,9 +169,15 @@ export class EdgeKV {
 	}
 
 	putRequest(args) {
-		const { namespace = this.#namespace, group = this.#group, item, value, timeout = null } = args || {};
+		const { namespace = this.#namespace, group = this.#group, item, value, timeout = null, ttl = null } = args || {};
 		this.validate({ namespace: namespace, group: group, item: item });
 		let uri = this.#edgekv_uri + "/api/v1/namespaces/" + namespace + "/groups/" + group + "/items/" + item;
+		if (ttl !== null && ttl !== undefined) {
+			if (typeof ttl !== "number" || !isFinite(ttl) || ttl <= 0) {
+				throw "TTL is not valid. Must be a positive number of seconds.";
+			}
+			uri = uri + "?ttl=" + Math.floor(ttl);
+		}
 		return httpRequest(this.addSandboxId(uri), this.addTimeout({
 			method: "PUT",
 			body: typeof value === "object" ? JSON.stringify(value) : value,
@@ -192,9 +198,9 @@ export class EdgeKV {
 	 * 		an object describing the non-200 response from the EdgeKV: {failed, status, body}
 	 */
 	async putText(args) {
-		const { namespace = this.#namespace, group = this.#group, item, value, timeout = null } = args || {};
+		const { namespace = this.#namespace, group = this.#group, item, value, timeout = null, ttl = null } = args || {};
 		return this.requestHandlerTemplate(
-			() => this.putRequest({ namespace: namespace, group: group, item: item, value: value, timeout: timeout }),
+			() => this.putRequest({ namespace: namespace, group: group, item: item, value: value, timeout: timeout, ttl: ttl }),
 			(response) => response.text(),
 			(response) => this.streamText(response.body),
 			"PUT",
@@ -214,9 +220,9 @@ export class EdgeKV {
 	 * 		an object describing the error: {failed, status, body}
 	 */
 	putTextNoWait(args) {
-		const { namespace = this.#namespace, group = this.#group, item, value } = args || {};
+		const { namespace = this.#namespace, group = this.#group, item, value, ttl = null } = args || {};
 		try {
-			this.putRequest({ namespace: namespace, group: group, item: item, value: value });
+			this.putRequest({ namespace: namespace, group: group, item: item, value: value, ttl: ttl });
 		} catch (error) {
 			this.throwError("PUT FAILED", 0, error.toString());
 		}
@@ -235,9 +241,9 @@ export class EdgeKV {
 	 * 		an object describing the non-200 response from the EdgeKV: {failed, status, body}
 	 */
 	async putJson(args) {
-		const { namespace = this.#namespace, group = this.#group, item, value, timeout = null } = args || {};
+		const { namespace = this.#namespace, group = this.#group, item, value, timeout = null, ttl = null } = args || {};
 		return this.requestHandlerTemplate(
-			() => this.putRequest({ namespace: namespace, group: group, item: item, value: JSON.stringify(value), timeout: timeout }),
+			() => this.putRequest({ namespace: namespace, group: group, item: item, value: JSON.stringify(value), timeout: timeout, ttl: ttl }),
 			(response) => response.text(),
 			(response) => this.streamText(response.body),
 			"PUT",
@@ -257,9 +263,9 @@ export class EdgeKV {
 	 * 		an object describing the error: {failed, status, body}
 	 */
 	putJsonNoWait(args) {
-		const { namespace = this.#namespace, group = this.#group, item, value } = args || {};
+		const { namespace = this.#namespace, group = this.#group, item, value, ttl = null } = args || {};
 		try {
-			this.putRequest({ namespace: namespace, group: group, item: item, value: JSON.stringify(value) });
+			this.putRequest({ namespace: namespace, group: group, item: item, value: JSON.stringify(value), ttl: ttl });
 		} catch (error) {
 			this.throwError("PUT FAILED", 0, error.toString());
 		}
