@@ -195,46 +195,82 @@ export const DEMO_JOURNEYS: Journey[] = [
  *  The continuous loop cycles through these, updating the textarea as it goes. */
 export const NARRATIVE_PROMPTS: Record<string, string[]> = {
   "data-analysis": [
-    "I need to investigate the Q4 churn spike in APAC. Pull the warehouse schema and table stats first.",
-    "Got the schema. Now run a query for all churned enterprise accounts by region over the last 6 months.",
-    "Hmm, the numbers don't match what the CFO showed. Cross-reference with the billing system's account statuses.",
-    "Found it — billing has 47 accounts marked 'active' that the warehouse shows as churned. Need to reconcile.",
-    "OK reconciled. Now pull the customer health scores for those accounts. I want to see if there's a pattern.",
-    "Interesting — high-value accounts with health scores below 0.3 are churning at 4x the rate. That's the signal.",
-    "Search the vector index for similar churn patterns from previous quarters. I want the top 10 semantic matches.",
-    "The pattern matches Q2 2023 almost exactly. What remediation steps worked back then? Pull that playbook.",
-    "Got the playbook. Now I need to build the executive dashboard with cohort retention curves for the board.",
-    "Dashboard is rendering but the CFO wants APAC broken down by country too. Pull the geo-dimension tables.",
-    "Actually, hold off on that — the data pipeline just errored. Let me check the ETL logs first.",
-    "Pipeline is back up. Now finalize the dashboard and pre-fetch the weekly report template for Monday.",
+    // TOOL_CONTEXT — schema, sql, warehouse, api, function, tool
+    "Pull the full warehouse schema for the revenue tables and index the column stats.",
+    "Run a SQL query against the churn funnel — segment by region, plan tier, and cohort month.",
+    "The ETL pipeline for daily metrics just broke. Check the runner logs and restart the failed functions.",
+    "I need the Stripe billing API schema to cross-reference actual MRR against warehouse projections.",
+    "Benchmark the query tool against last quarter's run — is the new index actually helping?",
+    // EDGEKV_MEMORY — customer, account, session, history, prior, refund, policy, memory
+    "Load the session history for the top 20 enterprise accounts flagged in the churn report.",
+    "What was the prior quarter's churn forecast? Compare it to actuals from the memory cache.",
+    "A customer just disputed their last three invoices. Pull the full account timeline and refund policy.",
+    "The board wants retention metrics by account age cohort. Grab the historical cohort assignments from session data.",
+    "Recall the analyst notebook from last month — it had a great segmentation model for at-risk accounts.",
+    // VECTOR_WEIGHTS — vector, search, embed, retrieve, similar, rank, cluster, index, knowledge
+    "Search the vector index for customers with similar usage decay patterns over the last 90 days.",
+    "Run a semantic similarity search across all support tickets — rank the top complaints by cluster.",
+    "Retrieve the nearest-neighbor cohorts from the embedding index for the high-churn segment.",
+    "Cluster the churned accounts by feature usage vectors and rank the top loss drivers.",
+    "Embed the new fiscal calendar into the knowledge index so reports auto-align to quarters.",
+    "Do a cross-company similarity search — do our churn patterns match any public benchmark datasets?",
+    // NO_OP or short — brief checks, summaries, confirmations
+    "Summarize the findings so far and prepare the executive briefing.",
+    "Done with the analysis. Push the final dashboard and notify the CFO.",
+    "Wait — double-check the pipeline status before we send anything out.",
+    "Final review. Anything I missed?",
   ],
   "code-generation": [
-    "I need to add rate limiting to the auth middleware. Show me the current implementation in the codebase.",
-    "Found the Express middleware. But there's also a GraphQL endpoint — does it go through the same auth layer?",
-    "It doesn't. The GraphQL resolver has its own auth. I need to add rate limiting there too. Find the resolver files.",
-    "OK I see the pattern now. Let me check if there's an existing rate limit implementation in this monorepo.",
-    "Found one in the payments service — it uses a token bucket. That's better than what I was going to write.",
-    "Adapted the token bucket for auth. Tests are passing locally but the CI is failing with a Redis connection error.",
-    "The test is sharing Redis state across test cases. Need to fix the isolation — pull the test helper patterns.",
-    "Fixed the tests. But now I realize the rate limit config should be per-tenant. Find the multi-tenant config schema.",
-    "The multi-tenant config needs a database migration. Let me find the migration guide and the existing schema files.",
-    "Migration is ready. One last thing — add monitoring metrics. Find the observability patterns used elsewhere.",
-    "Actually, I think there's a memory leak in the token bucket. Let me debug the counter reset logic.",
-    "False alarm — it was the test fixture. Everything is green. Pre-fetch the deployment pipeline config for release.",
+    // TOOL_CONTEXT
+    "Find the Express middleware stack — I need to trace the full request pipeline from route to handler.",
+    "Pull the TypeScript API types for the payments service. The function signatures need updating.",
+    "The test runner keeps flaking on CI. Check the Jest config and the Docker Compose setup for the test DB.",
+    "We're migrating from REST to GraphQL. Map out every existing route that touches the user model.",
+    "Audit the npm packages for vulnerabilities. Run the security scan tool against the full dependency tree.",
+    // EDGEKV_MEMORY
+    "What was the prior refactor approach for the auth module? I know we tried this before — check session notes.",
+    "The reviewer keeps rejecting my PR for the same reason. Pull their comment history to understand the pattern.",
+    "I need the multi-tenant account config from the last deployment. It's in the ops memory somewhere.",
+    "Recall the coding standards document from the onboarding session — am I breaking any rules here?",
+    "There was a memory leak reported in this exact module six months ago. Find the prior incident report.",
+    // VECTOR_WEIGHTS
+    "Search for semantically similar code across the monorepo — I want to deduplicate the rate limit logic.",
+    "Embed the PR review comments into the vector index so future reviewers can retrieve relevant past feedback.",
+    "Retrieve the top 10 most similar test files to the one I'm writing. I want to match the patterns exactly.",
+    "Rank all modules by bug density using the historical issue tracker data. Which files need the most love?",
+    "Cluster the failing E2E tests by error message similarity. I bet they all share a root cause.",
+    "Index the entire codebase documentation into the knowledge base so I can semantic-search for answers.",
+    // NO_OP / short
+    "Am I overthinking this? Let me take a step back.",
+    "Alright, all tests pass. Ship it.",
+    "Wait, one more sanity check — did I update the changelog?",
+    "Deploying. Fingers crossed.",
   ],
   "support-agent": [
-    "Customer 4582 is requesting a full refund for their annual plan. Pull their account history and subscription details.",
-    "They've been a premium customer for 3 years but filed 4 complaints this month. Something changed recently.",
-    "Check the refund policy for annual plans. I need the exact terms — proration rules, deadlines, exception criteria.",
-    "Policy says prorated refund within 60 days. They're at day 73. But there's an exception clause for service outages.",
-    "Search the knowledge base for similar refund exception cases from the last 12 months.",
-    "Found 3 similar cases — two were denied, one was approved by manager override due to a billing error on our side.",
-    "This customer also had a billing error last month. That strengthens their case. I'm going to escalate to a manager.",
-    "While the escalation is pending, pre-fetch the customer's full interaction history for the manager review.",
-    "Manager needs the legal terms for contract exceptions. Pull those from the policy documents repository.",
-    "Manager approved the exception. Now I need to process the refund and update the CRM with the resolution notes.",
-    "The CRM sync failed — there's a conflict because the billing system still shows the subscription as active.",
-    "Reconciled the records. Now send the confirmation email and update the customer health score to reflect the resolution.",
+    // TOOL_CONTEXT
+    "Customer 4582's refund is stuck. Pull the CRM tool schema and the billing adjustment API docs.",
+    "The escalation workflow requires manager approval. Find the route for the approval queue in the admin tool.",
+    "Run the SLA compliance report for enterprise accounts — the CFO wants to see our response time metrics.",
+    "The warehouse shows this account as active but billing shows cancelled. Which tool is the source of truth?",
+    "I need the premium support playbook for billing disputes. Pull it from the internal wiki API.",
+    // EDGEKV_MEMORY
+    "Load the full customer history — every interaction, every ticket, every invoice for the past 3 years.",
+    "The prior support agent left internal notes on this account. Pull the session transcript from last week.",
+    "Check the customer's account tier and SLA level. If they're premium, the refund policy is more lenient.",
+    "Recall similar refund cases from memory — what worked last time for enterprise accounts with billing errors?",
+    "This customer has complained about the same bug four times. Pull the incident history to build a timeline.",
+    // VECTOR_WEIGHTS
+    "Search the knowledge base for resolution patterns — retrieve the top 5 semantically similar ticket closures.",
+    "Embed this customer's complaint into the sentiment analysis index. Does it rank as high urgency?",
+    "Cluster all refund requests from this month. Are they similar in root cause, or is it noise?",
+    "Retrieve the nearest matching policy documents from the vector index for the specific refund clause cited.",
+    "Rank the customer health scores across the enterprise tier. Who else is at risk of churning?",
+    "Search the sentiment index for accounts with declining NPS scores — cross-reference with refund requests.",
+    // NO_OP / short
+    "Summarize the resolution and close the ticket.",
+    "Manager signed off. Process the refund and notify the customer.",
+    "Double-check the CRM sync before closing. Don't want a duplicate ticket.",
+    "Crisis averted. Take a breath.",
   ],
 };
 
@@ -312,22 +348,24 @@ export function formatNumber(value: number): string {
 export function classifyPromptAction(prompt: string): string {
   const normalized = prompt.toLowerCase();
   if (
-    /schema|sql|tool|api|function|warehouse|test|runner|route/.test(normalized)
+    /schema|sql|tool|api|function|warehouse|test|runner|route|pipeline|middleware|config|deploy|migration|package|build|compile/.test(
+      normalized,
+    )
   )
     return "TOOL_CONTEXT";
   if (
-    /memory|customer|account|session|history|prior|refund|policy/.test(
+    /memory|customer|account|session|history|prior|refund|policy|recall|tier|incident|timeline|review|standards/.test(
       normalized,
     )
   )
     return "EDGEKV_MEMORY";
   if (
-    /vector|search|embed|retrieve|similar|rank|cluster|index|knowledge/.test(
+    /vector|search|embed|retrieve|similar|rank|cluster|index|knowledge|semantic|nearest|sentiment/.test(
       normalized,
     )
   )
     return "VECTOR_WEIGHTS";
-  return normalized.trim().length < 6 ? "NO_OP" : "VECTOR_WEIGHTS";
+  return normalized.trim().length < 10 ? "NO_OP" : "VECTOR_WEIGHTS";
 }
 
 export function createDemoSnapshot(
