@@ -334,16 +334,25 @@ h3 {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    overflow: hidden;
     min-height: 0;
+}
+.zone-analytics,
+.zone-math {
+    overflow-y: auto;
 }
 .zone-analytics > *,
 .zone-math > * {
     flex-shrink: 0;
 }
+.zone-simulation {
+    overflow-y: auto;
+}
 .zone-simulation > .interceptor-card {
     flex: 1 1 0;
     min-height: 0;
+}
+.zone-simulation > .console-card {
+    flex-shrink: 0;
 }
 .counter-status,
 .active-prefetch {
