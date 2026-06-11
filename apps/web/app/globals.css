@@ -38,7 +38,7 @@ html {
 body {
     min-height: 100vh;
     margin: 0;
-    overflow: hidden;
+    overflow-x: hidden;
     background:
         radial-gradient(
             circle at 15% 8%,
@@ -101,12 +101,11 @@ h3 {
 
 .dashboard-shell {
     position: relative;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     padding: 14px 16px;
     isolation: isolate;
-    overflow: hidden;
 }
 .dashboard-shell::before {
     content: "";
@@ -250,8 +249,6 @@ h3 {
 }
 
 .zone-grid {
-    flex: 1;
-    min-height: 0;
     display: grid;
     grid-template-columns: minmax(340px, 0.82fr) minmax(440px, 1.18fr);
     grid-template-rows: auto 1fr;
@@ -260,7 +257,6 @@ h3 {
 }
 .dashboard-zone {
     min-width: 0;
-    min-height: 0;
     overflow: hidden;
     display: flex;
     flex-direction: column;
@@ -334,7 +330,11 @@ h3 {
 }
 .counter-panel,
 .zone-analytics,
-.zone-math,
+.zone-math {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
 .zone-simulation {
     display: flex;
     flex-direction: column;
