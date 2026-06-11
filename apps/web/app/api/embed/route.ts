@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_MODEL = "text-embedding-004";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1";
+const GEMINI_MODEL =
+  process.env.GEMINI_EMBEDDING_MODEL?.trim() || "gemini-embedding-001";
 
 interface EmbedRequest {
   input: string;

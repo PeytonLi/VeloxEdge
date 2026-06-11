@@ -21,6 +21,7 @@ import {
   calculateImprovement,
   classifyPromptAction,
   createDemoSnapshot,
+  getNarrativePrompt,
   initialConvergence,
   initialTimeline,
   snapshotToConvergencePoint,
@@ -176,6 +177,12 @@ export default function Dashboard() {
   const [runState, setRunState] = useState<RunState>("idle");
   const [stepBusy, setStepBusy] = useState(false);
   const continuousRef = useRef({ active: false, paused: false });
+  const narrativeIndexRef = useRef(0);
+
+  const handleSelectJourney = useCallback((journeyId: string) => {
+    narrativeIndexRef.current = 0;
+    setSelectedJourneyId(journeyId);
+  }, []);
 
   const selectedJourney = useMemo(() => {
     return (
@@ -306,16 +313,29 @@ export default function Dashboard() {
       .totalSteps;
     const idx = totalSteps % Math.max(1, selectedJourney.steps.length);
     const nextJourneyStep = selectedJourney.steps[idx];
-    const input =
-      prompt.trim().length > 0
-        ? prompt
-        : (nextJourneyStep?.contextVector ?? prompt);
+
+    // In continuous mode, generate a fresh narrative prompt each step
+    let input: string | number[];
+    if (continuousRef.current.active) {
+      const narrativePrompt = getNarrativePrompt(
+        selectedJourney.id,
+        narrativeIndexRef.current,
+      );
+      narrativeIndexRef.current += 1;
+      setPrompt(narrativePrompt);
+      input = narrativePrompt;
+    } else if (prompt.trim().length > 0) {
+      input = prompt;
+    } else {
+      input = nextJourneyStep?.contextVector ?? prompt;
+    }
+
     const usedRealEngine = await runRealStep(input);
     if (!usedRealEngine) {
       dispatchDemo({
         type: "step",
         journey: selectedJourney,
-        prompt,
+        prompt: typeof input === "string" ? input : prompt,
         alpha: fallbackAlpha,
       });
     }
@@ -356,6 +376,7 @@ export default function Dashboard() {
 
   const handleStop = useCallback(() => {
     continuousRef.current = { active: false, paused: false };
+    narrativeIndexRef.current = 0;
     setRunState("idle");
   }, []);
 
@@ -411,7 +432,7 @@ export default function Dashboard() {
             selectedJourneyId={selectedJourney.id}
             prompt={prompt}
             onPromptChange={setPrompt}
-            onSelectJourney={setSelectedJourneyId}
+            onSelectJourney={handleSelectJourney}
             onStep={handleStep}
             onRunJourney={handleRunJourney}
             onReset={handleReset}

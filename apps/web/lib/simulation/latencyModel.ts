@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 /** Pre-defined latency constants for the simulated edge model. */
-export const EDGE_HIT_MS = 5;    // cache hit at Akamai edge node
+export const EDGE_HIT_MS = 5; // cache hit at Akamai edge node
 export const COLD_FETCH_MS = 800; // cold-fetch round-trip to origin
 
 export interface LatencyResult {
@@ -45,8 +45,13 @@ export function computeLatency(
   bestAction: string,
   coldFetchMs: number,
 ): LatencyResult {
-  const coldMs = Math.max(EDGE_HIT_MS, finitePositive(coldFetchMs, COLD_FETCH_MS));
-  const cacheHit = predictedAction === bestAction;
+  const coldMs = Math.max(
+    EDGE_HIT_MS,
+    finitePositive(coldFetchMs, COLD_FETCH_MS),
+  );
+  // NO_OP means "don't pre-fetch anything" — it can never be a cache hit
+  const cacheHit =
+    predictedAction === bestAction && predictedAction !== "NO_OP";
   const latencyMs = cacheHit ? EDGE_HIT_MS : coldMs;
   const savedMs = cacheHit ? Math.max(0, coldMs - EDGE_HIT_MS) : 0;
   const maxSavings = Math.max(1, coldMs - EDGE_HIT_MS);
@@ -80,7 +85,10 @@ export function emptyStats(): LatencyStats {
   };
 }
 
-export function accumulateStats(stats: LatencyStats, result: LatencyResult): LatencyStats {
+export function accumulateStats(
+  stats: LatencyStats,
+  result: LatencyResult,
+): LatencyStats {
   const naiveStepMs = result.latencyMs + result.savedMs;
 
   return {

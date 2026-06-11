@@ -190,6 +190,66 @@ export const DEMO_JOURNEYS: Journey[] = [
   },
 ];
 
+/** Narrative prompts that simulate a real human working through each journey.
+ *  Each array tells a story — getting stuck, debugging, pivoting, finishing.
+ *  The continuous loop cycles through these, updating the textarea as it goes. */
+export const NARRATIVE_PROMPTS: Record<string, string[]> = {
+  "data-analysis": [
+    "I need to investigate the Q4 churn spike in APAC. Pull the warehouse schema and table stats first.",
+    "Got the schema. Now run a query for all churned enterprise accounts by region over the last 6 months.",
+    "Hmm, the numbers don't match what the CFO showed. Cross-reference with the billing system's account statuses.",
+    "Found it — billing has 47 accounts marked 'active' that the warehouse shows as churned. Need to reconcile.",
+    "OK reconciled. Now pull the customer health scores for those accounts. I want to see if there's a pattern.",
+    "Interesting — high-value accounts with health scores below 0.3 are churning at 4x the rate. That's the signal.",
+    "Search the vector index for similar churn patterns from previous quarters. I want the top 10 semantic matches.",
+    "The pattern matches Q2 2023 almost exactly. What remediation steps worked back then? Pull that playbook.",
+    "Got the playbook. Now I need to build the executive dashboard with cohort retention curves for the board.",
+    "Dashboard is rendering but the CFO wants APAC broken down by country too. Pull the geo-dimension tables.",
+    "Actually, hold off on that — the data pipeline just errored. Let me check the ETL logs first.",
+    "Pipeline is back up. Now finalize the dashboard and pre-fetch the weekly report template for Monday.",
+  ],
+  "code-generation": [
+    "I need to add rate limiting to the auth middleware. Show me the current implementation in the codebase.",
+    "Found the Express middleware. But there's also a GraphQL endpoint — does it go through the same auth layer?",
+    "It doesn't. The GraphQL resolver has its own auth. I need to add rate limiting there too. Find the resolver files.",
+    "OK I see the pattern now. Let me check if there's an existing rate limit implementation in this monorepo.",
+    "Found one in the payments service — it uses a token bucket. That's better than what I was going to write.",
+    "Adapted the token bucket for auth. Tests are passing locally but the CI is failing with a Redis connection error.",
+    "The test is sharing Redis state across test cases. Need to fix the isolation — pull the test helper patterns.",
+    "Fixed the tests. But now I realize the rate limit config should be per-tenant. Find the multi-tenant config schema.",
+    "The multi-tenant config needs a database migration. Let me find the migration guide and the existing schema files.",
+    "Migration is ready. One last thing — add monitoring metrics. Find the observability patterns used elsewhere.",
+    "Actually, I think there's a memory leak in the token bucket. Let me debug the counter reset logic.",
+    "False alarm — it was the test fixture. Everything is green. Pre-fetch the deployment pipeline config for release.",
+  ],
+  "support-agent": [
+    "Customer 4582 is requesting a full refund for their annual plan. Pull their account history and subscription details.",
+    "They've been a premium customer for 3 years but filed 4 complaints this month. Something changed recently.",
+    "Check the refund policy for annual plans. I need the exact terms — proration rules, deadlines, exception criteria.",
+    "Policy says prorated refund within 60 days. They're at day 73. But there's an exception clause for service outages.",
+    "Search the knowledge base for similar refund exception cases from the last 12 months.",
+    "Found 3 similar cases — two were denied, one was approved by manager override due to a billing error on our side.",
+    "This customer also had a billing error last month. That strengthens their case. I'm going to escalate to a manager.",
+    "While the escalation is pending, pre-fetch the customer's full interaction history for the manager review.",
+    "Manager needs the legal terms for contract exceptions. Pull those from the policy documents repository.",
+    "Manager approved the exception. Now I need to process the refund and update the CRM with the resolution notes.",
+    "The CRM sync failed — there's a conflict because the billing system still shows the subscription as active.",
+    "Reconciled the records. Now send the confirmation email and update the customer health score to reflect the resolution.",
+  ],
+};
+
+/** Get the next narrative prompt for a journey, cycling through the array. */
+export function getNarrativePrompt(
+  journeyId: string,
+  stepIndex: number,
+): string {
+  const prompts = NARRATIVE_PROMPTS[journeyId];
+  if (!prompts || prompts.length === 0) {
+    return "Continue the current workflow task.";
+  }
+  return prompts[stepIndex % prompts.length];
+}
+
 export interface TimelinePoint {
   step: number;
   naive: number;
