@@ -347,25 +347,53 @@ export function formatNumber(value: number): string {
 
 export function classifyPromptAction(prompt: string): string {
   const normalized = prompt.toLowerCase();
-  if (
-    /schema|sql|tool|api|function|warehouse|test|runner|route|pipeline|middleware|config|deploy|migration|package|build|compile/.test(
-      normalized,
-    )
-  )
-    return "TOOL_CONTEXT";
-  if (
-    /memory|customer|account|session|history|prior|refund|policy|recall|tier|incident|timeline|review|standards/.test(
-      normalized,
-    )
-  )
-    return "EDGEKV_MEMORY";
-  if (
-    /vector|search|embed|retrieve|similar|rank|cluster|index|knowledge|semantic|nearest|sentiment/.test(
-      normalized,
-    )
-  )
-    return "VECTOR_WEIGHTS";
-  return normalized.trim().length < 10 ? "NO_OP" : "VECTOR_WEIGHTS";
+
+  // Score each category — highest wins. Prevents a single broad keyword
+  // like "test" from always stealing the classification.
+  const scores: Record<string, number> = {
+    TOOL_CONTEXT: 0,
+    EDGEKV_MEMORY: 0,
+    VECTOR_WEIGHTS: 0,
+  };
+
+  // Strong tool signals (weight 2)
+  const toolStrong =
+    /\b(sql|schema|middleware|pipeline|migration|warehouse|etl|compile|docker)\b/;
+  // Weaker tool signals (weight 1)
+  const toolWeak = /\b(api|cli|runner|deploy|function|endpoint)\b/;
+  if (toolStrong.test(normalized)) scores.TOOL_CONTEXT += 2;
+  if (toolWeak.test(normalized)) scores.TOOL_CONTEXT += 1;
+
+  // Memory signals
+  const memStrong =
+    /\b(refund|policy|customer|account|recall|onboarding|incident)\b/;
+  const memWeak = /\b(session|history|prior|tier|timeline|reviewer|memory)\b/;
+  if (memStrong.test(normalized)) scores.EDGEKV_MEMORY += 2;
+  if (memWeak.test(normalized)) scores.EDGEKV_MEMORY += 1;
+
+  // Vector signals
+  const vecStrong =
+    /\b(vector|embed|semantic|similarity|nearest|sentiment|cluster|retriev)\b/;
+  const vecWeak = /\b(search|rank|index|knowledge|dedup|nps)\b/;
+  if (vecStrong.test(normalized)) scores.VECTOR_WEIGHTS += 2;
+  if (vecWeak.test(normalized)) scores.VECTOR_WEIGHTS += 1;
+
+  // Find the highest-scoring category
+  let best: string = "TOOL_CONTEXT";
+  let bestScore = scores.TOOL_CONTEXT;
+  for (const [cat, score] of Object.entries(scores)) {
+    if (score > bestScore) {
+      bestScore = score;
+      best = cat;
+    }
+  }
+
+  // If nothing scored, short prompts go to NO_OP
+  if (bestScore === 0) {
+    return normalized.trim().length < 10 ? "NO_OP" : "VECTOR_WEIGHTS";
+  }
+
+  return best;
 }
 
 export function createDemoSnapshot(
