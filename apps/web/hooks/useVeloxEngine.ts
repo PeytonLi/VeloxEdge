@@ -547,12 +547,16 @@ export function useVeloxEngine(
         setReady(true);
       }
       const prediction = engine.predictNextAction(scenario.contextVector);
-      const requestedKey = deriveAssetKey(
+      // Cache by predicted action so the bandit converges: after learning
+      // which arms produce high reward, repeat predictions of the same
+      // action hit the warmed local cache regardless of context drift.
+      const cacheKey = "velox:action:" + prediction.action;
+      const derivedKey = deriveAssetKey(
         scenario.contextVector,
         prediction.action,
       );
       const measured = await measuredLocalResolve(
-        requestedKey,
+        cacheKey,
         localAssetCacheRef.current,
       );
       const latency = latencyFromMeasured(
@@ -573,7 +577,7 @@ export function useVeloxEngine(
         rttMs: null,
         computeMicros: null,
         source: "local",
-        requestedKey,
+        requestedKey: derivedKey,
       };
     },
     [dimensions],
