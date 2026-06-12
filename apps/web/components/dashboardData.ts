@@ -373,7 +373,7 @@ export function classifyPromptAction(prompt: string): string {
 
   // Vector signals
   const vecStrong =
-    /\b(vector|embed|semantic|similarity|nearest|sentiment|cluster|retriev)\b/;
+    /\b(vector|embed|semantic|similarity|nearest|sentiment|cluster|retrieve)\b/;
   const vecWeak = /\b(search|rank|index|knowledge|dedup|nps)\b/;
   if (vecStrong.test(normalized)) scores.VECTOR_WEIGHTS += 2;
   if (vecWeak.test(normalized)) scores.VECTOR_WEIGHTS += 1;
